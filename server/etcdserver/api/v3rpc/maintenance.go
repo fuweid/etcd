@@ -125,6 +125,11 @@ func (ms *maintenanceServer) Snapshot(sr *pb.SnapshotRequest, srv pb.Maintenance
 	total := snap.Size()
 	size := humanize.Bytes(uint64(total))
 
+	// buffer just holds read bytes from stream
+	// response size is multiple of OS page size, fetched in boltdb
+	// e.g. 4*1024
+	buf := make([]byte, snapshotSendBufferSize)
+
 	start := time.Now()
 	ms.lg.Info("sending database snapshot to client",
 		zap.Int64("total-bytes", total),
@@ -132,13 +137,6 @@ func (ms *maintenanceServer) Snapshot(sr *pb.SnapshotRequest, srv pb.Maintenance
 		zap.String("storage-version", storageVersion),
 	)
 	for total-sent > 0 {
-		// buffer just holds read bytes from stream
-		// response size is multiple of OS page size, fetched in boltdb
-		// e.g. 4*1024
-		// NOTE: srv.Send does not wait until the message is received by the client.
-		// Therefore the buffer can not be safely reused between Send operations
-		buf := make([]byte, snapshotSendBufferSize)
-
 		n, err := io.ReadFull(pr, buf)
 		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
 			return togRPCError(err)
