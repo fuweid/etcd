@@ -17,6 +17,7 @@ package v3rpc
 import (
 	"context"
 	"crypto/sha256"
+	"fmt"
 	"io"
 	"time"
 
@@ -160,15 +161,24 @@ func (ms *maintenanceServer) Snapshot(sr *pb.SnapshotRequest, srv pb.Maintenance
 			return togRPCError(err)
 		}
 		h.Write(buf[:n])
+
+		// reset buf
+		for idx := range buf {
+			buf[idx] = 0
+		}
+
+		ms.lg.Info("ready to send next block")
 	}
 
 	// send SHA digest for integrity checks
 	// during snapshot restore operation
 	sha := h.Sum(nil)
 
+	shaInStr := fmt.Sprintf("%x", sha)
 	ms.lg.Info("sending database sha256 checksum to client",
 		zap.Int64("total-bytes", total),
 		zap.Int("checksum-size", len(sha)),
+		zap.String("checksum", shaInStr),
 	)
 	hresp := &pb.SnapshotResponse{RemainingBytes: 0, Blob: sha, Version: storageVersion}
 	if err := srv.Send(hresp); err != nil {

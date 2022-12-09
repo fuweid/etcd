@@ -354,9 +354,6 @@ func TestMaintenanceSnapshotContentDigest(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Snapshot.Close()
 
-	// ensure first stream block is still blocking
-	time.Sleep(3 * time.Second)
-
 	tmpDir := t.TempDir()
 	snapFile, err := os.Create(filepath.Join(tmpDir, t.Name()))
 	require.NoError(t, err)
@@ -366,7 +363,7 @@ func TestMaintenanceSnapshotContentDigest(t *testing.T) {
 	require.NoError(t, err)
 
 	// read the checksum
-	checksumSize := int64(32)
+	checksumSize := int64(sha256.Size)
 	_, err = snapFile.Seek(-checksumSize, io.SeekEnd)
 	require.NoError(t, err)
 

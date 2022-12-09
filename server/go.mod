@@ -81,6 +81,8 @@ replace (
 	go.etcd.io/etcd/client/v2 => ../client/v2
 	go.etcd.io/etcd/client/v3 => ../client/v3
 	go.etcd.io/etcd/pkg/v3 => ../pkg
+
+	google.golang.org/grpc v1.51.0 => github.com/fuweid/grpc-go v1.30.0-dev.1.0.20221211092256-b09defff5231
 )
 
 // Bad imports are sometimes causing attempts to pull that code.
