@@ -167,6 +167,12 @@ func (ms *maintenanceServer) Snapshot(sr *pb.SnapshotRequest, srv pb.Maintenance
 			return togRPCError(err)
 		}
 		h.Write(buf[:n])
+
+		for idx := range buf {
+			buf[idx] = 0
+		}
+
+		plog.Infof("ready to send next block")
 	}
 
 	// send SHA digest for integrity checks

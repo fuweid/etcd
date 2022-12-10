@@ -17,14 +17,18 @@ package integration
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"math"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -135,6 +139,69 @@ func TestMaintenanceSnapshotError(t *testing.T) {
 	_, err = io.Copy(ioutil.Discard, rc2)
 	if err != nil && !isClientTimeout(err) {
 		t.Errorf("expected client timeout, got %v", err)
+	}
+}
+
+func TestMaintenanceSnapshotContentDigest(t *testing.T) {
+	defer testutil.AfterTest(t)
+
+	clus := integration.NewClusterV3(t, &integration.ClusterConfig{Size: 1})
+	defer clus.Terminate(t)
+
+	populateDataIntoCluster(t, clus, 3, 1024*1024)
+
+	// reading snapshot with canceled context should error out
+	respBody, err := clus.RandClient().Snapshot(context.Background())
+	require.NoError(t, err)
+	defer respBody.Close()
+
+	time.Sleep(3 * time.Second)
+
+	tmpDir := t.TempDir()
+	snapFile, err := os.Create(filepath.Join(tmpDir, t.Name()))
+	require.NoError(t, err)
+	defer snapFile.Close()
+
+	snapSize, err := io.Copy(snapFile, respBody)
+	require.NoError(t, err)
+
+	// read the checksum
+	checksumSize := int64(32)
+	_, err = snapFile.Seek(-checksumSize, io.SeekEnd)
+	require.NoError(t, err)
+
+	checksumInBytes, err := io.ReadAll(snapFile)
+	require.NoError(t, err)
+	require.Equal(t, int(checksumSize), len(checksumInBytes))
+
+	// remove the checksum part and rehash
+	err = snapFile.Truncate(snapSize - checksumSize)
+	require.NoError(t, err)
+
+	_, err = snapFile.Seek(0, io.SeekStart)
+	require.NoError(t, err)
+
+	hashWriter := sha256.New()
+	_, err = io.Copy(hashWriter, snapFile)
+	require.NoError(t, err)
+
+	// compare the checksum
+	actualChecksum := hashWriter.Sum(nil)
+	require.Equal(t, checksumInBytes, actualChecksum)
+}
+
+// populateDataIntoCluster populates the key-value pairs into cluster and the
+// key will be named by testing.T.Name()-index.
+func populateDataIntoCluster(t *testing.T, cluster *integration.ClusterV3, numKeys int, valueSize int) {
+	ctx := context.Background()
+
+	for i := 0; i < numKeys; i++ {
+		_, err := cluster.RandClient().Put(ctx,
+			fmt.Sprintf("%s-%v", t.Name(), i), strings.Repeat("a", valueSize))
+
+		if err != nil {
+			t.Errorf("populating data expected no error, but got %v", err)
+		}
 	}
 }
 
