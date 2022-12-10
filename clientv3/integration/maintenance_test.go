@@ -17,11 +17,15 @@ package integration
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"math"
+	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -194,6 +198,90 @@ func TestMaintenanceSnapshotErrorInflight(t *testing.T) {
 	_, err = io.Copy(ioutil.Discard, rc2)
 	if err != nil && !isClientTimeout(err) {
 		t.Errorf("expected client timeout, got %v", err)
+	}
+}
+
+func TestMaintenanceSnapshotContentDigest(t *testing.T) {
+	defer testutil.AfterTest(t)
+
+	clus := integration.NewClusterV3(t, &integration.ClusterConfig{Size: 1})
+	defer clus.Terminate(t)
+
+	populateDataIntoCluster(t, clus, 3, 1024*1024)
+
+	// reading snapshot with canceled context should error out
+	respBody, err := clus.RandClient().Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respBody.Close()
+
+	time.Sleep(3 * time.Second)
+
+	tmpDir := t.TempDir()
+	snapFile, err := os.Create(filepath.Join(tmpDir, t.Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer snapFile.Close()
+
+	snapSize, err := io.Copy(snapFile, respBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// read the checksum
+	checksumSize := int64(32)
+	_, err = snapFile.Seek(-checksumSize, io.SeekEnd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	checksumInBytes, err := io.ReadAll(snapFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(int(checksumSize), len(checksumInBytes)) {
+		t.Fatal("oops")
+	}
+
+	// remove the checksum part and rehash
+	err = snapFile.Truncate(snapSize - checksumSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = snapFile.Seek(0, io.SeekStart)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hashWriter := sha256.New()
+	_, err = io.Copy(hashWriter, snapFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// compare the checksum
+	actualChecksum := hashWriter.Sum(nil)
+	if !reflect.DeepEqual(actualChecksum, checksumInBytes) {
+		t.Fatal("oops")
+	}
+	t.Logf("received sha256 %x", checksumInBytes)
+}
+
+// populateDataIntoCluster populates the key-value pairs into cluster and the
+// key will be named by testing.T.Name()-index.
+func populateDataIntoCluster(t *testing.T, cluster *integration.ClusterV3, numKeys int, valueSize int) {
+	ctx := context.Background()
+
+	for i := 0; i < numKeys; i++ {
+		_, err := cluster.RandClient().Put(ctx,
+			fmt.Sprintf("%s-%v", t.Name(), i), strings.Repeat("a", valueSize))
+
+		if err != nil {
+			t.Errorf("populating data expected no error, but got %v", err)
+		}
 	}
 }
 

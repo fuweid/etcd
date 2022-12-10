@@ -17,6 +17,7 @@ package v3rpc
 import (
 	"context"
 	"crypto/sha256"
+	"fmt"
 	"io"
 	"time"
 
@@ -120,19 +121,18 @@ func (ms *maintenanceServer) Snapshot(sr *pb.SnapshotRequest, srv pb.Maintenance
 	sent := int64(0)
 	total := snap.Size()
 	size := humanize.Bytes(uint64(total))
+	// buffer just holds read bytes from stream
+	// response size is multiple of OS page size, fetched in boltdb
+	// e.g. 4*1024
+	buf := make([]byte, snapshotSendBufferSize)
 
 	start := time.Now()
 	ms.lg.Info("sending database snapshot to client",
 		zap.Int64("total-bytes", total),
 		zap.String("size", size),
 	)
+
 	for total-sent > 0 {
-		// buffer just holds read bytes from stream
-		// response size is multiple of OS page size, fetched in boltdb
-		// e.g. 4*1024
-		// NOTE: srv.Send does not wait until the message is received by the client.
-		// Therefore the buffer can not be safely reused between Send operations
-		buf := make([]byte, snapshotSendBufferSize)
 
 		n, err := io.ReadFull(pr, buf)
 		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
@@ -156,11 +156,19 @@ func (ms *maintenanceServer) Snapshot(sr *pb.SnapshotRequest, srv pb.Maintenance
 			return togRPCError(err)
 		}
 		h.Write(buf[:n])
+
+		for idx := range buf {
+			buf[idx] = 0
+		}
+
+		fmt.Println("ready to send next block")
 	}
 
 	// send SHA digest for integrity checks
 	// during snapshot restore operation
 	sha := h.Sum(nil)
+
+	fmt.Printf("sending sha256 %x\n", sha)
 
 	ms.lg.Info("sending database sha256 checksum to client",
 		zap.Int64("total-bytes", total),
