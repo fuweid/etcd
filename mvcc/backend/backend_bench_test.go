@@ -19,6 +19,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"go.etcd.io/etcd/mvcc/buckets"
 )
 
 func BenchmarkBackendPut(b *testing.B) {
@@ -38,13 +40,13 @@ func BenchmarkBackendPut(b *testing.B) {
 	batchTx := backend.BatchTx()
 
 	batchTx.Lock()
-	batchTx.UnsafeCreateBucket([]byte("test"))
+	batchTx.UnsafeCreateBucket(buckets.Test)
 	batchTx.Unlock()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		batchTx.Lock()
-		batchTx.UnsafePut([]byte("test"), keys[i], value)
+		batchTx.UnsafePut(buckets.Test, keys[i], value)
 		batchTx.Unlock()
 	}
 }

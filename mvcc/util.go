@@ -19,6 +19,7 @@ import (
 	"fmt"
 
 	"go.etcd.io/etcd/mvcc/backend"
+	"go.etcd.io/etcd/mvcc/buckets"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 )
 
@@ -28,7 +29,7 @@ func UpdateConsistentIndex(be backend.Backend, index uint64) {
 	defer tx.Unlock()
 
 	var oldi uint64
-	_, vs := tx.UnsafeRange(metaBucketName, consistentIndexKeyName, nil, 0)
+	_, vs := tx.UnsafeRange(buckets.Meta, consistentIndexKeyName, nil, 0)
 	if len(vs) != 0 {
 		oldi = binary.BigEndian.Uint64(vs[0])
 	}
@@ -39,7 +40,7 @@ func UpdateConsistentIndex(be backend.Backend, index uint64) {
 
 	bs := make([]byte, 8)
 	binary.BigEndian.PutUint64(bs, index)
-	tx.UnsafePut(metaBucketName, consistentIndexKeyName, bs)
+	tx.UnsafePut(buckets.Meta, consistentIndexKeyName, bs)
 }
 
 func WriteKV(be backend.Backend, kv mvccpb.KeyValue) {
@@ -52,6 +53,6 @@ func WriteKV(be backend.Backend, kv mvccpb.KeyValue) {
 	}
 
 	be.BatchTx().Lock()
-	be.BatchTx().UnsafePut(keyBucketName, ibytes, d)
+	be.BatchTx().UnsafePut(buckets.Key, ibytes, d)
 	be.BatchTx().Unlock()
 }

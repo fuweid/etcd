@@ -21,6 +21,7 @@ import (
 
 	"go.etcd.io/etcd/etcdserver/api/v2store"
 	"go.etcd.io/etcd/mvcc/backend"
+	"go.etcd.io/etcd/mvcc/buckets"
 	"go.etcd.io/etcd/pkg/types"
 
 	"github.com/coreos/go-semver/semver"
@@ -35,10 +36,6 @@ const (
 )
 
 var (
-	membersBucketName        = []byte("members")
-	membersRemovedBucketName = []byte("members_removed")
-	clusterBucketName        = []byte("cluster")
-
 	StoreMembersPrefix        = path.Join(storePrefix, "members")
 	storeRemovedMembersPrefix = path.Join(storePrefix, "removed_members")
 )
@@ -52,7 +49,7 @@ func mustSaveMemberToBackend(be backend.Backend, m *Member) {
 
 	tx := be.BatchTx()
 	tx.Lock()
-	tx.UnsafePut(membersBucketName, mkey, mvalue)
+	tx.UnsafePut(buckets.Members, mkey, mvalue)
 	tx.Unlock()
 }
 
@@ -61,8 +58,8 @@ func mustDeleteMemberFromBackend(be backend.Backend, id types.ID) {
 
 	tx := be.BatchTx()
 	tx.Lock()
-	tx.UnsafeDelete(membersBucketName, mkey)
-	tx.UnsafePut(membersRemovedBucketName, mkey, []byte("removed"))
+	tx.UnsafeDelete(buckets.Members, mkey)
+	tx.UnsafePut(buckets.MembersRemoved, mkey, []byte("removed"))
 	tx.Unlock()
 }
 
@@ -72,7 +69,7 @@ func mustSaveClusterVersionToBackend(be backend.Backend, ver *semver.Version) {
 	tx := be.BatchTx()
 	tx.Lock()
 	defer tx.Unlock()
-	tx.UnsafePut(clusterBucketName, ckey, []byte(ver.String()))
+	tx.UnsafePut(buckets.Cluster, ckey, []byte(ver.String()))
 }
 
 func mustSaveMemberToStore(s v2store.Store, m *Member) {
@@ -163,9 +160,9 @@ func mustCreateBackendBuckets(be backend.Backend) {
 	tx := be.BatchTx()
 	tx.Lock()
 	defer tx.Unlock()
-	tx.UnsafeCreateBucket(membersBucketName)
-	tx.UnsafeCreateBucket(membersRemovedBucketName)
-	tx.UnsafeCreateBucket(clusterBucketName)
+	tx.UnsafeCreateBucket(buckets.Members)
+	tx.UnsafeCreateBucket(buckets.MembersRemoved)
+	tx.UnsafeCreateBucket(buckets.Cluster)
 }
 
 func MemberStoreKey(id types.ID) string {

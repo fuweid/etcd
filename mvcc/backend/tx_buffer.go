@@ -17,13 +17,15 @@ package backend
 import (
 	"bytes"
 	"sort"
+
+	"go.etcd.io/etcd/mvcc/buckets"
 )
 
 const bucketBufferInitialSize = 512
 
 // txBuffer handles functionality shared between txWriteBuffer and txReadBuffer.
 type txBuffer struct {
-	buckets map[string]*bucketBuffer
+	buckets map[buckets.BucketID]*bucketBuffer
 }
 
 func (txb *txBuffer) reset() {
@@ -39,19 +41,21 @@ func (txb *txBuffer) reset() {
 // txWriteBuffer buffers writes of pending updates that have not yet committed.
 type txWriteBuffer struct {
 	txBuffer
-	seq bool
+	// Map from bucket name into information whether this bucket is edited
+	// sequentially (i.e. keys are growing monotonically).
+	bucket2seq map[buckets.BucketID]bool
 }
 
-func (txw *txWriteBuffer) put(bucket, k, v []byte) {
-	txw.seq = false
+func (txw *txWriteBuffer) put(bucket buckets.Bucket, k, v []byte) {
+	txw.bucket2seq[bucket.ID()] = false
 	txw.putSeq(bucket, k, v)
 }
 
-func (txw *txWriteBuffer) putSeq(bucket, k, v []byte) {
-	b, ok := txw.buckets[string(bucket)]
+func (txw *txWriteBuffer) putSeq(bucket buckets.Bucket, k, v []byte) {
+	b, ok := txw.buckets[bucket.ID()]
 	if !ok {
 		b = newBucketBuffer()
-		txw.buckets[string(bucket)] = b
+		txw.buckets[bucket.ID()] = b
 	}
 	b.add(k, v)
 }
@@ -64,7 +68,7 @@ func (txw *txWriteBuffer) writeback(txr *txReadBuffer) {
 			txr.buckets[k] = wb
 			continue
 		}
-		if !txw.seq && wb.used > 1 {
+		if seq, ok := txw.bucket2seq[k]; ok && !seq && wb.used > 1 {
 			// assume no duplicate keys
 			sort.Sort(wb)
 		}
@@ -75,6 +79,18 @@ func (txw *txWriteBuffer) writeback(txr *txReadBuffer) {
 	txr.bufVersion++
 }
 
+func (txw *txWriteBuffer) reset() {
+	txw.txBuffer.reset()
+	for k := range txw.bucket2seq {
+		v, ok := txw.buckets[k]
+		if !ok {
+			delete(txw.bucket2seq, k)
+		} else if v.used == 0 {
+			txw.bucket2seq[k] = true
+		}
+	}
+}
+
 // txReadBuffer accesses buffered updates.
 type txReadBuffer struct {
 	txBuffer
@@ -82,15 +98,15 @@ type txReadBuffer struct {
 	bufVersion uint64
 }
 
-func (txr *txReadBuffer) Range(bucketName, key, endKey []byte, limit int64) ([][]byte, [][]byte) {
-	if b := txr.buckets[string(bucketName)]; b != nil {
+func (txr *txReadBuffer) Range(bucket buckets.Bucket, key, endKey []byte, limit int64) ([][]byte, [][]byte) {
+	if b := txr.buckets[bucket.ID()]; b != nil {
 		return b.Range(key, endKey, limit)
 	}
 	return nil, nil
 }
 
-func (txr *txReadBuffer) ForEach(bucketName []byte, visitor func(k, v []byte) error) error {
-	if b := txr.buckets[string(bucketName)]; b != nil {
+func (txr *txReadBuffer) ForEach(bucket buckets.Bucket, visitor func(k, v []byte) error) error {
+	if b := txr.buckets[bucket.ID()]; b != nil {
 		return b.ForEach(visitor)
 	}
 	return nil
@@ -100,7 +116,7 @@ func (txr *txReadBuffer) ForEach(bucketName []byte, visitor func(k, v []byte) er
 func (txr *txReadBuffer) unsafeCopy() txReadBuffer {
 	txrCopy := txReadBuffer{
 		txBuffer: txBuffer{
-			buckets: make(map[string]*bucketBuffer, len(txr.txBuffer.buckets)),
+			buckets: make(map[buckets.BucketID]*bucketBuffer, len(txr.txBuffer.buckets)),
 		},
 		bufVersion: 0,
 	}

@@ -28,6 +28,7 @@ import (
 	"github.com/coreos/pkg/capnslog"
 	humanize "github.com/dustin/go-humanize"
 	bolt "go.etcd.io/bbolt"
+	"go.etcd.io/etcd/mvcc/buckets"
 	"go.uber.org/zap"
 )
 
@@ -56,7 +57,7 @@ type Backend interface {
 	ConcurrentReadTx() ReadTx
 
 	Snapshot() Snapshot
-	Hash(ignores map[IgnoreKey]struct{}) (uint32, error)
+	Hash(ignores func(bucketName, keyName []byte) bool) (uint32, error)
 	// Size returns the current size of the backend physically allocated.
 	// The backend can hold DB space that is not utilized at the moment,
 	// since it can conduct pre-allocation or spare unused space for recycling.
@@ -187,10 +188,10 @@ func newBackend(bcfg BackendConfig) *backend {
 
 		readTx: &readTx{
 			buf: txReadBuffer{
-				txBuffer:   txBuffer{make(map[string]*bucketBuffer)},
+				txBuffer:   txBuffer{make(map[buckets.BucketID]*bucketBuffer)},
 				bufVersion: 0,
 			},
-			buckets: make(map[string]*bolt.Bucket),
+			buckets: make(map[buckets.BucketID]*bolt.Bucket),
 			txWg:    new(sync.WaitGroup),
 		},
 		txReadBufferCache: txReadBufferCache{
@@ -352,12 +353,7 @@ func (b *backend) Snapshot() Snapshot {
 	return &snapshot{tx, stopc, donec}
 }
 
-type IgnoreKey struct {
-	Bucket string
-	Key    string
-}
-
-func (b *backend) Hash(ignores map[IgnoreKey]struct{}) (uint32, error) {
+func (b *backend) Hash(ignores func(bucketName, keyName []byte) bool) (uint32, error) {
 	h := crc32.New(crc32.MakeTable(crc32.Castagnoli))
 
 	b.mu.RLock()
@@ -371,8 +367,7 @@ func (b *backend) Hash(ignores map[IgnoreKey]struct{}) (uint32, error) {
 			}
 			h.Write(next)
 			b.ForEach(func(k, v []byte) error {
-				bk := IgnoreKey{Bucket: string(next), Key: string(k)}
-				if _, ok := ignores[bk]; !ok {
+				if ignores != nil && !ignores(next, k) {
 					h.Write(k)
 					h.Write(v)
 				}

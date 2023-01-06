@@ -34,6 +34,7 @@ import (
 	pb "go.etcd.io/etcd/etcdserver/etcdserverpb"
 	"go.etcd.io/etcd/mvcc"
 	"go.etcd.io/etcd/mvcc/backend"
+	"go.etcd.io/etcd/mvcc/buckets"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.etcd.io/etcd/pkg/pbutil"
 	"go.etcd.io/etcd/pkg/types"
@@ -120,8 +121,8 @@ func prepareBackend() backend.Backend {
 
 	tx := be.BatchTx()
 	tx.Lock()
-	tx.UnsafeCreateBucket([]byte("key"))
-	tx.UnsafeCreateBucket([]byte("meta"))
+	tx.UnsafeCreateBucket(buckets.Key)
+	tx.UnsafeCreateBucket(buckets.Meta)
 	tx.Unlock()
 	return be
 }

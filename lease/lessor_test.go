@@ -31,6 +31,7 @@ import (
 	pb "go.etcd.io/etcd/etcdserver/etcdserverpb"
 	"go.etcd.io/etcd/lease/leasepb"
 	"go.etcd.io/etcd/mvcc/backend"
+	"go.etcd.io/etcd/mvcc/buckets"
 	"go.etcd.io/etcd/pkg/testutil"
 	"go.etcd.io/etcd/version"
 	"go.uber.org/zap"
@@ -97,7 +98,7 @@ func TestLessorGrant(t *testing.T) {
 	}
 
 	be.BatchTx().Lock()
-	_, vs := be.BatchTx().UnsafeRange(leaseBucketName, int64ToBytes(int64(l.ID)), nil, 0)
+	_, vs := be.BatchTx().UnsafeRange(buckets.Lease, int64ToBytes(int64(l.ID)), nil, 0)
 	if len(vs) != 1 {
 		t.Errorf("len(vs) = %d, want 1", len(vs))
 	}
@@ -200,7 +201,7 @@ func TestLessorRevoke(t *testing.T) {
 	}
 
 	be.BatchTx().Lock()
-	_, vs := be.BatchTx().UnsafeRange(leaseBucketName, int64ToBytes(int64(l.ID)), nil, 0)
+	_, vs := be.BatchTx().UnsafeRange(buckets.Lease, int64ToBytes(int64(l.ID)), nil, 0)
 	if len(vs) != 0 {
 		t.Errorf("len(vs) = %d, want 0", len(vs))
 	}
@@ -623,7 +624,7 @@ func TestLeaseBackend(t *testing.T) {
 					ID:  math.MaxInt64,
 					TTL: 3,
 				})
-				tx.UnsafeDelete(leaseBucketName, int64ToBytes(-1))
+				tx.UnsafeDelete(buckets.Lease, int64ToBytes(-1))
 			},
 			want: []*leasepb.Lease{
 				{
@@ -643,7 +644,7 @@ func TestLeaseBackend(t *testing.T) {
 			be, tmpPath := backend.NewTmpBackend(time.Microsecond, 10)
 			tx := be.BatchTx()
 			tx.Lock()
-			tx.UnsafeCreateBucket(leaseBucketName)
+			tx.UnsafeCreateBucket(buckets.Lease)
 			tc.setup(tx)
 			tx.Unlock()
 
@@ -735,7 +736,7 @@ func mustUnsafePutLease(tx backend.BatchTx, lpb *leasepb.Lease) {
 	if err != nil {
 		panic("failed to marshal lease proto item")
 	}
-	tx.UnsafePut(leaseBucketName, key, val)
+	tx.UnsafePut(buckets.Lease, key, val)
 }
 
 type fakeDeleter struct {

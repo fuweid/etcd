@@ -17,6 +17,7 @@ package mvcc
 import (
 	"go.etcd.io/etcd/lease"
 	"go.etcd.io/etcd/mvcc/backend"
+	"go.etcd.io/etcd/mvcc/buckets"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.etcd.io/etcd/pkg/traceutil"
 	"go.uber.org/zap"
@@ -153,7 +154,7 @@ func (tr *storeTxnRead) rangeKeys(key, end []byte, curRev int64, ro RangeOptions
 	revBytes := newRevBytes()
 	for i, revpair := range revpairs[:len(kvs)] {
 		revToBytes(revpair, revBytes)
-		_, vs := tr.tx.UnsafeRange(keyBucketName, revBytes, nil, 0)
+		_, vs := tr.tx.UnsafeRange(buckets.Key, revBytes, nil, 0)
 		if len(vs) != 1 {
 			if tr.s.lg != nil {
 				tr.s.lg.Fatal(
@@ -227,7 +228,7 @@ func (tw *storeTxnWrite) put(key, value []byte, leaseID lease.LeaseID) {
 	}
 
 	tw.trace.Step("marshal mvccpb.KeyValue")
-	tw.tx.UnsafeSeqPut(keyBucketName, ibytes, d)
+	tw.tx.UnsafeSeqPut(buckets.Key, ibytes, d)
 	tw.s.kvindex.Put(key, idxRev)
 	tw.changes = append(tw.changes, kv)
 	tw.trace.Step("store kv pair into bolt db")
@@ -301,7 +302,7 @@ func (tw *storeTxnWrite) delete(key []byte) {
 		}
 	}
 
-	tw.tx.UnsafeSeqPut(keyBucketName, ibytes, d)
+	tw.tx.UnsafeSeqPut(buckets.Key, ibytes, d)
 	err = tw.s.kvindex.Tombstone(key, idxRev)
 	if err != nil {
 		if tw.storeTxnRead.s.lg != nil {

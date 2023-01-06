@@ -22,6 +22,7 @@ import (
 
 	"go.etcd.io/etcd/lease"
 	"go.etcd.io/etcd/mvcc/backend"
+	"go.etcd.io/etcd/mvcc/buckets"
 	"go.etcd.io/etcd/pkg/traceutil"
 	"go.uber.org/zap"
 )
@@ -73,7 +74,7 @@ func TestScheduleCompaction(t *testing.T) {
 		ibytes := newRevBytes()
 		for _, rev := range revs {
 			revToBytes(rev, ibytes)
-			tx.UnsafePut(keyBucketName, ibytes, []byte("bar"))
+			tx.UnsafePut(buckets.Key, ibytes, []byte("bar"))
 		}
 		tx.Unlock()
 
@@ -82,12 +83,12 @@ func TestScheduleCompaction(t *testing.T) {
 		tx.Lock()
 		for _, rev := range tt.wrevs {
 			revToBytes(rev, ibytes)
-			keys, _ := tx.UnsafeRange(keyBucketName, ibytes, nil, 0)
+			keys, _ := tx.UnsafeRange(buckets.Key, ibytes, nil, 0)
 			if len(keys) != 1 {
 				t.Errorf("#%d: range on %v = %d, want 1", i, rev, len(keys))
 			}
 		}
-		_, vals := tx.UnsafeRange(metaBucketName, finishedCompactKeyName, nil, 0)
+		_, vals := tx.UnsafeRange(buckets.Meta, finishedCompactKeyName, nil, 0)
 		revToBytes(revision{main: tt.rev}, ibytes)
 		if w := [][]byte{ibytes}; !reflect.DeepEqual(vals, w) {
 			t.Errorf("#%d: vals on %v = %+v, want %+v", i, finishedCompactKeyName, vals, w)

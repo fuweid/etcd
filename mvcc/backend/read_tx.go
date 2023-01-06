@@ -15,17 +15,16 @@
 package backend
 
 import (
-	"bytes"
 	"math"
 	"sync"
 
 	bolt "go.etcd.io/bbolt"
+	"go.etcd.io/etcd/mvcc/buckets"
 )
 
-// safeRangeBucket is a hack to avoid inadvertently reading duplicate keys;
-// overwrites on a bucket should only fetch with limit=1, but safeRangeBucket
+// IsSafeRangeBucket is a hack to avoid inadvertently reading duplicate keys;
+// overwrites on a bucket should only fetch with limit=1, but IsSafeRangeBucket
 // is known to never overwrite any key so range is safe.
-var safeRangeBucket = []byte("key")
 
 type ReadTx interface {
 	Lock()
@@ -33,8 +32,8 @@ type ReadTx interface {
 	RLock()
 	RUnlock()
 
-	UnsafeRange(bucketName []byte, key, endKey []byte, limit int64) (keys [][]byte, vals [][]byte)
-	UnsafeForEach(bucketName []byte, visitor func(k, v []byte) error) error
+	UnsafeRange(bucket buckets.Bucket, key, endKey []byte, limit int64) (keys [][]byte, vals [][]byte)
+	UnsafeForEach(bucket buckets.Bucket, visitor func(k, v []byte) error) error
 }
 
 type readTx struct {
@@ -46,7 +45,7 @@ type readTx struct {
 	// txMu protects accesses to buckets and tx on Range requests.
 	txMu    sync.RWMutex
 	tx      *bolt.Tx
-	buckets map[string]*bolt.Bucket
+	buckets map[buckets.BucketID]*bolt.Bucket
 	// txWg protects tx from being rolled back at the end of a batch interval until all reads using this tx are done.
 	txWg *sync.WaitGroup
 }
@@ -56,7 +55,7 @@ func (rt *readTx) Unlock()  { rt.mu.Unlock() }
 func (rt *readTx) RLock()   { rt.mu.RLock() }
 func (rt *readTx) RUnlock() { rt.mu.RUnlock() }
 
-func (rt *readTx) UnsafeRange(bucketName, key, endKey []byte, limit int64) ([][]byte, [][]byte) {
+func (rt *readTx) UnsafeRange(bucketType buckets.Bucket, key, endKey []byte, limit int64) ([][]byte, [][]byte) {
 	if endKey == nil {
 		// forbid duplicates for single keys
 		limit = 1
@@ -64,22 +63,22 @@ func (rt *readTx) UnsafeRange(bucketName, key, endKey []byte, limit int64) ([][]
 	if limit <= 0 {
 		limit = math.MaxInt64
 	}
-	if limit > 1 && !bytes.Equal(bucketName, safeRangeBucket) {
+	if limit > 1 && !bucketType.IsSafeRangeBucket() {
 		panic("do not use unsafeRange on non-keys bucket")
 	}
-	keys, vals := rt.buf.Range(bucketName, key, endKey, limit)
+	keys, vals := rt.buf.Range(bucketType, key, endKey, limit)
 	if int64(len(keys)) == limit {
 		return keys, vals
 	}
 
 	// find/cache bucket
-	bn := string(bucketName)
+	bn := bucketType.ID()
 	rt.txMu.RLock()
 	bucket, ok := rt.buckets[bn]
 	rt.txMu.RUnlock()
 	if !ok {
 		rt.txMu.Lock()
-		bucket = rt.tx.Bucket(bucketName)
+		bucket = rt.tx.Bucket(bucketType.Name())
 		rt.buckets[bn] = bucket
 		rt.txMu.Unlock()
 	}
@@ -96,7 +95,7 @@ func (rt *readTx) UnsafeRange(bucketName, key, endKey []byte, limit int64) ([][]
 	return append(k2, keys...), append(v2, vals...)
 }
 
-func (rt *readTx) UnsafeForEach(bucketName []byte, visitor func(k, v []byte) error) error {
+func (rt *readTx) UnsafeForEach(bucket buckets.Bucket, visitor func(k, v []byte) error) error {
 	dups := make(map[string]struct{})
 	getDups := func(k, v []byte) error {
 		dups[string(k)] = struct{}{}
@@ -108,21 +107,21 @@ func (rt *readTx) UnsafeForEach(bucketName []byte, visitor func(k, v []byte) err
 		}
 		return visitor(k, v)
 	}
-	if err := rt.buf.ForEach(bucketName, getDups); err != nil {
+	if err := rt.buf.ForEach(bucket, getDups); err != nil {
 		return err
 	}
 	rt.txMu.Lock()
-	err := unsafeForEach(rt.tx, bucketName, visitNoDup)
+	err := unsafeForEach(rt.tx, bucket, visitNoDup)
 	rt.txMu.Unlock()
 	if err != nil {
 		return err
 	}
-	return rt.buf.ForEach(bucketName, visitor)
+	return rt.buf.ForEach(bucket, visitor)
 }
 
 func (rt *readTx) reset() {
 	rt.buf.reset()
-	rt.buckets = make(map[string]*bolt.Bucket)
+	rt.buckets = make(map[buckets.BucketID]*bolt.Bucket)
 	rt.tx = nil
 	rt.txWg = new(sync.WaitGroup)
 }
@@ -132,7 +131,7 @@ type concurrentReadTx struct {
 	buf     txReadBuffer
 	txMu    *sync.RWMutex
 	tx      *bolt.Tx
-	buckets map[string]*bolt.Bucket
+	buckets map[buckets.BucketID]*bolt.Bucket
 	txWg    *sync.WaitGroup
 }
 
@@ -145,7 +144,7 @@ func (rt *concurrentReadTx) RLock() {}
 // RUnlock signals the end of concurrentReadTx.
 func (rt *concurrentReadTx) RUnlock() { rt.txWg.Done() }
 
-func (rt *concurrentReadTx) UnsafeForEach(bucketName []byte, visitor func(k, v []byte) error) error {
+func (rt *concurrentReadTx) UnsafeForEach(bucket buckets.Bucket, visitor func(k, v []byte) error) error {
 	dups := make(map[string]struct{})
 	getDups := func(k, v []byte) error {
 		dups[string(k)] = struct{}{}
@@ -157,19 +156,19 @@ func (rt *concurrentReadTx) UnsafeForEach(bucketName []byte, visitor func(k, v [
 		}
 		return visitor(k, v)
 	}
-	if err := rt.buf.ForEach(bucketName, getDups); err != nil {
+	if err := rt.buf.ForEach(bucket, getDups); err != nil {
 		return err
 	}
 	rt.txMu.Lock()
-	err := unsafeForEach(rt.tx, bucketName, visitNoDup)
+	err := unsafeForEach(rt.tx, bucket, visitNoDup)
 	rt.txMu.Unlock()
 	if err != nil {
 		return err
 	}
-	return rt.buf.ForEach(bucketName, visitor)
+	return rt.buf.ForEach(bucket, visitor)
 }
 
-func (rt *concurrentReadTx) UnsafeRange(bucketName, key, endKey []byte, limit int64) ([][]byte, [][]byte) {
+func (rt *concurrentReadTx) UnsafeRange(bucketType buckets.Bucket, key, endKey []byte, limit int64) ([][]byte, [][]byte) {
 	if endKey == nil {
 		// forbid duplicates for single keys
 		limit = 1
@@ -177,22 +176,22 @@ func (rt *concurrentReadTx) UnsafeRange(bucketName, key, endKey []byte, limit in
 	if limit <= 0 {
 		limit = math.MaxInt64
 	}
-	if limit > 1 && !bytes.Equal(bucketName, safeRangeBucket) {
+	if limit > 1 && !bucketType.IsSafeRangeBucket() {
 		panic("do not use unsafeRange on non-keys bucket")
 	}
-	keys, vals := rt.buf.Range(bucketName, key, endKey, limit)
+	keys, vals := rt.buf.Range(bucketType, key, endKey, limit)
 	if int64(len(keys)) == limit {
 		return keys, vals
 	}
 
 	// find/cache bucket
-	bn := string(bucketName)
+	bn := bucketType.ID()
 	rt.txMu.RLock()
 	bucket, ok := rt.buckets[bn]
 	rt.txMu.RUnlock()
 	if !ok {
 		rt.txMu.Lock()
-		bucket = rt.tx.Bucket(bucketName)
+		bucket = rt.tx.Bucket(bucketType.Name())
 		rt.buckets[bn] = bucket
 		rt.txMu.Unlock()
 	}

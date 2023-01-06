@@ -39,6 +39,7 @@ import (
 	"go.etcd.io/etcd/lease"
 	"go.etcd.io/etcd/mvcc"
 	"go.etcd.io/etcd/mvcc/backend"
+	"go.etcd.io/etcd/mvcc/buckets"
 	"go.etcd.io/etcd/pkg/fileutil"
 	"go.etcd.io/etcd/pkg/traceutil"
 	"go.etcd.io/etcd/pkg/types"
@@ -402,10 +403,10 @@ func (s *v3Manager) saveDB() error {
 	}
 
 	// delete stored members from old cluster since using new members
-	btx.UnsafeForEach([]byte("members"), del)
+	btx.UnsafeForEach(buckets.Members, del)
 
 	// todo: add back new members when we start to deprecate old snap file.
-	btx.UnsafeForEach([]byte("members_removed"), del)
+	btx.UnsafeForEach(buckets.MembersRemoved, del)
 
 	// trigger write-out of new consistent index
 	txn.End()

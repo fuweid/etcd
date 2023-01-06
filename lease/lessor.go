@@ -29,6 +29,7 @@ import (
 	pb "go.etcd.io/etcd/etcdserver/etcdserverpb"
 	"go.etcd.io/etcd/lease/leasepb"
 	"go.etcd.io/etcd/mvcc/backend"
+	"go.etcd.io/etcd/mvcc/buckets"
 	"go.uber.org/zap"
 )
 
@@ -42,8 +43,6 @@ var v3_6 = semver.Version{Major: 3, Minor: 6}
 
 var (
 	forever = time.Time{}
-
-	leaseBucketName = []byte("lease")
 
 	// maximum number of leases to revoke per second; configurable for tests
 	leaseRevokeRate = 1000
@@ -353,7 +352,7 @@ func (le *lessor) Revoke(id LeaseID) error {
 	// lease deletion needs to be in the same backend transaction with the
 	// kv deletion. Or we might end up with not executing the revoke or not
 	// deleting the keys if etcdserver fails in between.
-	le.b.BatchTx().UnsafeDelete(leaseBucketName, int64ToBytes(int64(l.ID)))
+	le.b.BatchTx().UnsafeDelete(buckets.Lease, int64ToBytes(int64(l.ID)))
 
 	txn.End()
 
@@ -799,7 +798,7 @@ func (le *lessor) initAndRecover() {
 	tx := le.b.BatchTx()
 	tx.Lock()
 
-	tx.UnsafeCreateBucket(leaseBucketName)
+	tx.UnsafeCreateBucket(buckets.Lease)
 	lpbs := unsafeGetAllLeases(tx)
 	tx.Unlock()
 
@@ -854,7 +853,7 @@ func (l *Lease) persistTo(b backend.Backend) {
 	}
 
 	b.BatchTx().Lock()
-	b.BatchTx().UnsafePut(leaseBucketName, key, val)
+	b.BatchTx().UnsafePut(buckets.Lease, key, val)
 	b.BatchTx().Unlock()
 }
 
@@ -927,7 +926,7 @@ func bytesToLeaseID(bytes []byte) int64 {
 
 func unsafeGetAllLeases(tx backend.ReadTx) []*leasepb.Lease {
 	ls := make([]*leasepb.Lease, 0)
-	err := tx.UnsafeForEach(leaseBucketName, func(k, v []byte) error {
+	err := tx.UnsafeForEach(buckets.Lease, func(k, v []byte) error {
 		var lpb leasepb.Lease
 		err := lpb.Unmarshal(v)
 		if err != nil {
