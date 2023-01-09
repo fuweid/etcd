@@ -5,8 +5,8 @@ import argparse
 import logging
 import pandas as pd
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
-import matplotlib.colors as colors
 
 logging.basicConfig(format='[%(levelname)s %(asctime)s %(name)s] %(message)s')
 logger = logging.getLogger(__name__)
@@ -24,11 +24,6 @@ def parse_args():
                         help='second input data files in csv format. (optional)')
     parser.add_argument('-t', '--title', dest='title', type=str, required=True,
                         help='plot graph title string')
-    parser.add_argument('-z', '--zero-centered', dest='zero', action='store_true', required=False,
-                        help='plot the improvement graph with white color represents 0.0',
-                        default=True)
-    parser.add_argument('--no-zero-centered', dest='zero', action='store_false', required=False,
-                        help='plot the improvement graph without white color represents 0.0')
     parser.add_argument('-o', '--output-image-file', dest='output', type=str, required=True,
                         help='output image filename')
     parser.add_argument('-F', '--output-format', dest='format', type=str, default='png',
@@ -78,106 +73,121 @@ def load_data_files(*args):
         sys.exit(1)
     return res
 
+# heatmap is copied from https://matplotlib.org/3.5.0/gallery/images_contours_and_fields/image_annotated_heatmap.html
+def heatmap(data, row_labels, col_labels, ax=None,
+            cbar_kw={}, cbarlabel="", **kwargs):
+    """
+    Create a heatmap from a numpy array and two lists of labels.
 
-# This is copied directly from matplotlib source code. Some early versions of matplotlib
-# do not have CenteredNorm class
-class CenteredNorm(colors.Normalize):
+    Parameters
+    ----------
+    data
+        A 2D numpy array of shape (M, N).
+    row_labels
+        A list or array of length M with the labels for the rows.
+    col_labels
+        A list or array of length N with the labels for the columns.
+    ax
+        A `matplotlib.axes.Axes` instance to which the heatmap is plotted.  If
+        not provided, use current axes or create a new one.  Optional.
+    cbar_kw
+        A dictionary with arguments to `matplotlib.Figure.colorbar`.  Optional.
+    cbarlabel
+        The label for the colorbar.  Optional.
+    **kwargs
+        All other arguments are forwarded to `imshow`.
+    """
 
-    def __init__(self, vcenter=0, halfrange=None, clip=False):
-        """
-        Normalize symmetrical data around a center (0 by default).
+    if not ax:
+        ax = plt.gca()
 
-        Unlike `TwoSlopeNorm`, `CenteredNorm` applies an equal rate of change
-        around the center.
+    # Plot the heatmap
+    im = ax.imshow(data, **kwargs)
 
-        Useful when mapping symmetrical data around a conceptual center
-        e.g., data that range from -2 to 4, with 0 as the midpoint, and
-        with equal rates of change around that midpoint.
+    # Create colorbar
+    cbar = ax.figure.colorbar(im, ax=ax, **cbar_kw)
+    cbar.ax.set_ylabel(cbarlabel, rotation=-90, va="bottom")
 
-        Parameters
-        ----------
-        vcenter : float, default: 0
-            The data value that defines ``0.5`` in the normalization.
-        halfrange : float, optional
-            The range of data values that defines a range of ``0.5`` in the
-            normalization, so that *vcenter* - *halfrange* is ``0.0`` and
-            *vcenter* + *halfrange* is ``1.0`` in the normalization.
-            Defaults to the largest absolute difference to *vcenter* for
-            the values in the dataset.
+    # Show all ticks and label them with the respective list entries.
+    ax.set_xticks(np.arange(data.shape[1]), labels=col_labels)
+    ax.set_yticks(np.arange(data.shape[0]), labels=row_labels)
 
-        Examples
-        --------
-        This maps data values -2 to 0.25, 0 to 0.5, and 4 to 1.0
-        (assuming equal rates of change above and below 0.0):
+    # Turn spines off and create white grid.
+    ax.spines[:].set_visible(False)
+    return im, cbar
 
-            >>> import matplotlib.colors as mcolors
-            >>> norm = mcolors.CenteredNorm(halfrange=4.0)
-            >>> data = [-2., 0., 4.]
-            >>> norm(data)
-            array([0.25, 0.5 , 1.  ])
-        """
-        self._vcenter = vcenter
-        self.vmin = None
-        self.vmax = None
-        # calling the halfrange setter to set vmin and vmax
-        self.halfrange = halfrange
-        self.clip = clip
+def annotate_heatmap(im, data=None, valfmt="{x:.2f}",
+                     textcolors=("white", "black"),
+                     threshold=None, **textkw):
+    """
+    A function to annotate a heatmap.
 
-    def _set_vmin_vmax(self):
-        """
-        Set *vmin* and *vmax* based on *vcenter* and *halfrange*.
-        """
-        self.vmax = self._vcenter + self._halfrange
-        self.vmin = self._vcenter - self._halfrange
+    Parameters
+    ----------
+    im
+        The AxesImage to be labeled.
+    data
+        Data used to annotate.  If None, the image's data is used.  Optional.
+    valfmt
+        The format of the annotations inside the heatmap.  This should either
+        use the string format method, e.g. "$ {x:.2f}", or be a
+        `matplotlib.ticker.Formatter`.  Optional.
+    textcolors
+        A pair of colors.  The first is used for values below a threshold,
+        the second for those above.  Optional.
+    threshold
+        Value in data units according to which the colors from textcolors are
+        applied.  If None (the default) uses the middle of the colormap as
+        separation.  Optional.
+    **kwargs
+        All other arguments are forwarded to each call to `text` used to create
+        the text labels.
+    """
 
-    def autoscale(self, A):
-        """
-        Set *halfrange* to ``max(abs(A-vcenter))``, then set *vmin* and *vmax*.
-        """
-        A = np.asanyarray(A)
-        self._halfrange = max(self._vcenter-A.min(),
-                              A.max()-self._vcenter)
-        self._set_vmin_vmax()
+    if not isinstance(data, (list, np.ndarray)):
+        data = im.get_array()
 
-    def autoscale_None(self, A):
-        """Set *vmin* and *vmax*."""
-        A = np.asanyarray(A)
-        if self._halfrange is None and A.size:
-            self.autoscale(A)
+    # Normalize the threshold to the images color range.
+    if threshold is not None:
+        threshold = im.norm(threshold)
+    else:
+        threshold = im.norm(data.max())/2.
 
-    @property
-    def vcenter(self):
-        return self._vcenter
+    # Set default alignment to center, but allow it to be
+    # overwritten by textkw.
+    kw = dict(horizontalalignment="center",
+              verticalalignment="center")
+    kw.update(textkw)
 
-    @vcenter.setter
-    def vcenter(self, vcenter):
-        self._vcenter = vcenter
-        if self.vmax is not None:
-            # recompute halfrange assuming vmin and vmax represent
-            # min and max of data
-            self._halfrange = max(self._vcenter-self.vmin,
-                                  self.vmax-self._vcenter)
-            self._set_vmin_vmax()
+    # Get the formatter in case a string is supplied
+    if isinstance(valfmt, str):
+        valfmt = matplotlib.ticker.StrMethodFormatter(valfmt)
 
-    @property
-    def halfrange(self):
-        return self._halfrange
+    # Loop over the data and create a `Text` for each "pixel".
+    # Change the text's color depending on the data.
+    texts = []
+    for i in range(data.shape[0]):
+        for j in range(data.shape[1]):
+            kw.update(color=textcolors[int(im.norm(data[i, j]) > threshold)])
+            text = im.axes.text(j, i, valfmt(data[i, j], None), **kw)
+            texts.append(text)
 
-    @halfrange.setter
-    def halfrange(self, halfrange):
-        if halfrange is None:
-            self._halfrange = None
-            self.vmin = None
-            self.vmax = None
-        else:
-            self._halfrange = abs(halfrange)
+    return texts
 
-    def __call__(self, value, clip=None):
-        if self._halfrange is not None:
-            # enforce symmetry, reset vmin and vmax
-            self._set_vmin_vmax()
-        return super().__call__(value, clip=clip)
+def human_sizes(size):
+    """
+    Returns human-readable string for a given bytes.
+    """
 
+    size = float(size)
+    KiB = float(1024)
+    MiB = float(KiB ** 2)
+    if size < KiB:
+        return '{0} Bytes'.format(size)
+    elif KiB <= size < MiB:
+        return '{0:.2f} KiB'.format(size / KiB)
+    else:
+        return '{0:.2f} MiB'.format(size / MiB)
 
 # plot type is the type of the data to plot. Either 'read' or 'write'
 def plot_data(title, plot_type, cmap_name_default, *args):
@@ -190,14 +200,23 @@ def plot_data(title, plot_type, cmap_name_default, *args):
         for val, df in df0.groupby('ratio'):
             count += 1
             plt.subplot(4, 2, count)
-            plt.tripcolor(df['conn_size'], df['value_size'], df[plot_type])
+
+            connsize_labels = sorted(df['conn_size'].unique())
+            # use reverse to ensure that it is ascending from bottom to top
+            valuesize_labels = sorted(df['value_size'].unique())[::-1]
+            # use reverse to ensure that it is ascending from bottom to top
+            dataset = np.reshape(df[plot_type].to_numpy(), (-1, len(connsize_labels)))[::-1]
+
+            valuesize_labels = [human_sizes(i) for i in valuesize_labels]
+
+            im, _ = heatmap(dataset, valuesize_labels, connsize_labels,
+                    cmap=cmap_name_default, cbarlabel="Requests/sec")
+            annotate_heatmap(im, valfmt="{x:.1f}", size=7, fontweight="bold")
+
             plt.title('R/W Ratio {:.4f} [{:.2f}, {:.2f}]'.format(val, df[plot_type].min(),
                                                                  df[plot_type].max()))
-            plt.yscale('log', base=2)
-            plt.ylabel('Value Size')
-            plt.xscale('log', base=2)
-            plt.xlabel('Connections Amount')
-            plt.colorbar()
+            plt.ylabel("Value Size")
+            plt.xlabel("Connections Amount")
             plt.tight_layout()
         fig.suptitle('{} [{}]\n{}'.format(title, plot_type.upper(), df0param))
     elif len(args) == 2:
@@ -216,16 +235,28 @@ def plot_data(title, plot_type, cmap_name_default, *args):
             for val, df in tmp.groupby('ratio'):
                 pos = row * 3 + col + 1
                 plt.subplot(8, 3, pos)
-                norm = None
+
+                cmap_name = cmap_name_default
+                cbarformat=None
+                cbarlabel="Requests/sec"
+
                 if col == 2:
-                    cmap_name = 'bwr'
-                    if params.zero:
-                        norm = CenteredNorm()
-                else:
-                    cmap_name = cmap_name_default
-                plt.tripcolor(df['conn_size'], df['value_size'], df[plot_type],
-                              norm=norm,
-                              cmap=plt.get_cmap(cmap_name))
+                    cmap_name = 'hot'
+                    cbarformat="%.2f%%"
+                    cbarlabel=""
+
+                connsize_labels = sorted(df['conn_size'].unique())
+                # use reverse to ensure that it is ascending from bottom to top
+                valuesize_labels = sorted(df['value_size'].unique())[::-1]
+                # use reverse to ensure that it is ascending from bottom to top
+                dataset = np.reshape(df[plot_type].to_numpy(), (-1, len(connsize_labels)))[::-1]
+
+                valuesize_labels = [human_sizes(i) for i in valuesize_labels]
+
+                im, cbar = heatmap(dataset, valuesize_labels, connsize_labels, 
+                        cbar_kw={"format": cbarformat}, cbarlabel=cbarlabel, cmap=cmap_name)
+                annotate_heatmap(im, valfmt="{x:.1f}", size=7, fontweight="bold")
+
                 if row == 0:
                     if col == 0:
                         plt.title('{}\nR/W Ratio {:.4f} [{:.1f}, {:.1f}]'.format(
@@ -245,15 +276,8 @@ def plot_data(title, plot_type, cmap_name_default, *args):
                     else:
                         plt.title('R/W Ratio {:.4f} [{:.1f}, {:.1f}]'.format(val, df[plot_type].min(),
                                                                              df[plot_type].max()))
-                plt.yscale('log', base=2)
                 plt.ylabel('Value Size')
-                plt.xscale('log', base=2)
                 plt.xlabel('Connections Amount')
-
-                if col == 2:
-                    plt.colorbar(format='%.2f%%')
-                else:
-                    plt.colorbar()
                 plt.tight_layout()
                 row += 1
             col += 1
