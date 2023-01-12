@@ -65,7 +65,7 @@ jobs:
             ;;
           linux-amd64-grpcproxy)
             PASSES='build grpcproxy' CPU='4' RACE='true' ./test 2>&1 | tee test.log
-            ! egrep "(--- FAIL:|DATA RACE|panic: test timed out|appears to have leaked)" -B50 -A10 test.log
+            ! egrep "(--- FAIL:|DATA RACE|panic: test timed out|appears to have leaked|Too many goroutines running after all test)" -B50 -A10 test.log
             ;;
           linux-386-unit)
             GOARCH=386 PASSES='unit' ./test
