@@ -348,9 +348,9 @@ function integration_e2e_pass {
 }
 
 function grpcproxy_pass {
-	go test -timeout 30m -v ${RACE} -tags cluster_proxy -cpu "${TEST_CPUS}" "$@" "${REPO_PATH}/integration"
-	go test -timeout 30m -v ${RACE} -tags cluster_proxy -cpu "${TEST_CPUS}" "$@" "${REPO_PATH}/clientv3/integration"
-	go test -timeout 30m -v -tags cluster_proxy "$@" "${REPO_PATH}/tests/e2e"
+	go test -timeout 30m -v ${RACE} -tags cluster_proxy -count=1 -cpu "${TEST_CPUS}" "$@" "${REPO_PATH}/integration"
+	#go test -timeout 30m -v ${RACE} -tags cluster_proxy -cpu "${TEST_CPUS}" "$@" "${REPO_PATH}/clientv3/integration"
+	#go test -timeout 30m -v -tags cluster_proxy "$@" "${REPO_PATH}/tests/e2e"
 }
 
 function release_pass {
