@@ -79,6 +79,7 @@ func ExampleClient_metrics() {
 
 		// confirm range request in metrics
 		for _, l := range strings.Split(string(b), "\n") {
+			fmt.Println(l)
 			if strings.Contains(l, `grpc_client_started_total{grpc_method="Range"`) {
 				fmt.Println(l)
 				break

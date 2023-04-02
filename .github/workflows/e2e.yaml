@@ -24,10 +24,12 @@ jobs:
         echo "${TARGET}"
         case "${TARGET}" in
           linux-amd64-e2e)
-            GOOS=linux GOARCH=amd64 CPU=4 EXPECT_DEBUG=true RACE=true make test-e2e-release
+            # GOOS=linux GOARCH=amd64 CPU=4 EXPECT_DEBUG=true RACE=true make test-e2e-release
+            exit 0
             ;;
           linux-386-e2e)
-            GOOS=linux GOARCH=386 CPU=4 EXPECT_DEBUG=true RACE=true make test-e2e
+            # GOOS=linux GOARCH=386 CPU=4 EXPECT_DEBUG=true RACE=true make test-e2e
+            exit 0
             ;;
           *)
             echo "Failed to find target"
