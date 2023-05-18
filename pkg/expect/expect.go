@@ -121,13 +121,14 @@ func (ep *ExpectProcess) read() {
 func (ep *ExpectProcess) tryReadNextLine(r *bufio.Reader) error {
 	printDebugLines := os.Getenv("EXPECT_DEBUG") != ""
 	l, err := r.ReadString('\n')
+	readAt := time.Now().Format(time.RFC3339Nano)
 
 	ep.mu.Lock()
 	defer ep.mu.Unlock()
 
 	if l != "" {
 		if printDebugLines {
-			fmt.Printf("%s (%s) (%d): %s", ep.cmd.Path, ep.cfg.name, ep.cmd.Process.Pid, l)
+			fmt.Printf("%s (%s) (%s) (%d): %s", ep.cmd.Path, readAt, ep.cfg.name, ep.cmd.Process.Pid, l)
 		}
 		ep.lines = append(ep.lines, l)
 		ep.count++
