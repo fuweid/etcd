@@ -69,6 +69,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -524,7 +525,7 @@ func (c *Cluster) waitVersion() {
 func isMembersEqual(membs []*pb.Member, wmembs []*pb.Member) bool {
 	sort.Sort(SortableMemberSliceByPeerURLs(membs))
 	sort.Sort(SortableMemberSliceByPeerURLs(wmembs))
-	return cmp.Equal(membs, wmembs, cmpopts.IgnoreFields(pb.Member{}, "ID", "PeerURLs", "ClientURLs"))
+	return cmp.Equal(membs, wmembs, cmpopts.IgnoreFields(pb.Member{}, "ID", "PeerURLs", "ClientURLs"), cmp.Comparer(proto.Equal))
 }
 
 func NewLocalListener(t testutil.TB) net.Listener {
