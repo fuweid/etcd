@@ -63,13 +63,12 @@ import (
 	"go.etcd.io/etcd/tests/v3/framework/testutils"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/soheilhy/cmux"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
-	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/testing/protocmp"
 )
 
 const (
@@ -525,7 +524,7 @@ func (c *Cluster) waitVersion() {
 func isMembersEqual(membs []*pb.Member, wmembs []*pb.Member) bool {
 	sort.Sort(SortableMemberSliceByPeerURLs(membs))
 	sort.Sort(SortableMemberSliceByPeerURLs(wmembs))
-	return cmp.Equal(membs, wmembs, cmpopts.IgnoreFields(pb.Member{}, "ID", "PeerURLs", "ClientURLs"), cmp.Comparer(proto.Equal))
+	return cmp.Equal(membs, wmembs, protocmp.Transform(), protocmp.IgnoreFields(&pb.Member{}, "ID", "peerURLs", "clientURLs"))
 }
 
 func NewLocalListener(t testutil.TB) net.Listener {
