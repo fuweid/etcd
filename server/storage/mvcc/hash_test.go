@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 
 	"go.etcd.io/etcd/pkg/v3/traceutil"
@@ -230,4 +231,104 @@ func TestHasherStoreFull(t *testing.T) {
 	if err != nil {
 		t.Errorf("Didn't expect error for new revision, err: %v", err)
 	}
+}
+
+func TestHashKVImpactedByKeep(t *testing.T) {
+	// key: "foo"
+	// modified: 9
+	// generations:
+	//    {{9, 0}[1]}
+	//    {{5, 0}, {6, 0}, {7, 0}, {8, 0}(t)[4]}
+	//    {{2, 0}, {3, 0}, {4, 0}(t)[3]}
+	s := newTestStoreForHashKV(t, false)
+
+	// After compacted, it will be like
+	//
+	// key: "foo"
+	// modified: 9
+	// generations:
+	//    {{9, 0}[1]}
+	//    {{5, 0}, {6, 0}, {7, 0}, {8, 0}(t)[4]}
+	//
+	doneCh, err := s.Compact(traceutil.TODO(), 5)
+	require.NoError(t, err)
+	<-doneCh
+
+	// (5,0), (6,0), (7,0) and (8,0),
+	s.HashStorage().HashByRev(8)
+
+	// (6,0), (7,0).
+	s.HashStorage().HashByRev(7)
+}
+
+func TestHashKVImpactedByKeep2(t *testing.T) {
+	// key: "foo"
+	// modified: 9
+	// generations:
+	//    {{9, 0}[1]}
+	//    {{5, 0}, {6, 0}, {7, 0}, {8, 0}(t)[4]}
+	//    {{2, 0}, {3, 0}, {4, 0}(t)[3]}
+
+	// key: "foo2"
+	// modified: 2
+	// generations:
+	//    {{2, 1}[1]}
+	s := newTestStoreForHashKV(t, true)
+
+	// After compacted, it will be like
+	//
+	// key: "foo"
+	// modified: 9
+	// generations:
+	//    {{9, 0}[1]}
+	//    {{5, 0}, {6, 0}, {7, 0}, {8, 0}(t)[4]}
+	//
+	// key: "foo2"
+	// modified: 2
+	// generations:
+	//    {{2, 1}[1]}
+	doneCh, err := s.Compact(traceutil.TODO(), 5)
+	require.NoError(t, err)
+	<-doneCh
+
+	// (2,1), (6,0), (7,0) and (8,0)
+	s.HashStorage().HashByRev(8)
+
+	// (2,1), (6,0) and (7,0).
+	s.HashStorage().HashByRev(7)
+}
+
+func newTestStoreForHashKV(t *testing.T, twoKeys bool) *store {
+	b, _ := betesting.NewDefaultTmpBackend(t)
+	s := NewStore(zaptest.NewLogger(t), b, &lease.FakeLessor{}, StoreConfig{})
+	t.Cleanup(func() {
+		cleanup(s, b)
+	})
+
+	key := []byte("foo")
+	// key: "foo"
+	// modified: 9
+	// generations:
+	//    {{9, 0}[1]}
+	//    {{5, 0}, {6, 0}, {7, 0}, {8, 0}(t)[4]}
+	//    {{2, 0}, {3, 0}, {4, 0}(t)[3]}
+
+	key2 := []byte("foo2")
+	// key: "foo2"
+	// modified: 2
+	// generations:
+	//    {{2, 1}[1]}
+	for i := 2; i <= 9; i++ {
+		if i%4 == 0 {
+			s.DeleteRange(key, nil)
+		} else {
+			w := s.Write(traceutil.TODO())
+			w.Put(key, []byte(fmt.Sprintf("%d", i)), lease.NoLease)
+			if twoKeys && i == 2 {
+				w.Put(key2, []byte(fmt.Sprintf("%d", i)), lease.NoLease)
+			}
+			w.End()
+		}
+	}
+	return s
 }
