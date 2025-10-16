@@ -20,6 +20,7 @@ import (
 	"io"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -416,4 +417,111 @@ func ensureAllMembersFromV3StoreAreVotingMembers(t *testing.T, dataDir string) {
 	for _, m := range members {
 		require.Falsef(t, m.IsLearner, "member is still learner: %+v", m)
 	}
+}
+
+func TestIssue20793(t *testing.T) {
+	e2e.BeforeTest(t)
+
+	newCfgFunc := func(execPath string) *e2e.EtcdProcessClusterConfig {
+		cfg := e2e.NewConfigNoTLS()
+		cfg.BasePeerScheme = "unix"
+		cfg.ClusterSize = 1
+		cfg.ExecPath = execPath
+		cfg.KeepDataDir = true
+		cfg.SnapshotCount = 10
+		return cfg
+	}
+
+	v3518Binary := downloadReleaseBinary(t, "v3.5.18")
+	v3522Binary := downloadReleaseBinary(t, "v3.5.22")
+
+	t.Log("Create a single node etcd cluster with v3.5.18")
+	cfg := newCfgFunc(v3518Binary)
+	epc, err := e2e.NewEtcdProcessCluster(t, cfg)
+	require.NoError(t, err, "failed to start etcd cluster: %v", err)
+	defer func() {
+		derr := epc.Close()
+		require.NoError(t, derr, "failed to close etcd cluster")
+	}()
+
+	etcdctl := epc.Procs[0].Etcdctl(e2e.ClientNonTLS, false, false)
+
+	t.Logf("Adding 1000 key/value")
+	for i := 0; i < 1000; i++ {
+		err = etcdctl.Put(fmt.Sprintf("foo%d", i), strings.Repeat("ABCDEFG", 1024))
+		require.NoError(t, err, "failed to ensure cluster is healthy")
+	}
+
+	t.Log("Add and start a learner with v3.5.22")
+	learnerID, err := epc.StartNewProc(nil, true, t, func(sCfg *e2e.EtcdServerProcessConfig) {
+		sCfg.ExecPath = v3522Binary
+	})
+	require.NoError(t, err)
+
+	t.Logf("Promoting the learner %x", learnerID)
+	_, err = etcdctl.MemberPromote(learnerID)
+	require.NoError(t, err)
+
+	t.Log("Add new member with v3.5.22")
+	_, err = epc.StartNewProc(nil, false, t, func(sCfg *e2e.EtcdServerProcessConfig) {
+		sCfg.ExecPath = v3522Binary // FIXME: replace with e2e.BinPath if there is fix patch
+	})
+	require.NoError(t, err)
+
+	log, err := epc.Procs[2].Logs().Expect("applied incoming Raft snapshot")
+	require.NoError(t, err)
+	t.Logf("Last member has applied snapshot: %s", log)
+
+	t.Logf("Stopping the cluster with %s", e2e.BinPath)
+	for _, proc := range epc.Procs {
+		proc.WithStopSignal(syscall.SIGTERM)
+	}
+	require.NoError(t, epc.Stop(), "failed to close etcd cluster")
+
+	for _, tt := range []struct {
+		name      string
+		proc      e2e.EtcdProcess
+		isLearner bool
+	}{
+		{
+			name:      "first etcd member - v3.5.18 doesn't have fix so isLearner in v3store is true",
+			proc:      epc.Procs[0],
+			isLearner: true,
+		},
+		{
+			name:      "second etcd member - v3.5.22 has fix patch and it receives snapshot before promotion, so isLearner in v3store is false",
+			proc:      epc.Procs[1],
+			isLearner: false,
+		},
+		{
+			name:      "last etcd member - v3.5.22 has fix patch but it receives snapshot from leader, so isLearner in v3store is true",
+			proc:      epc.Procs[2],
+			isLearner: true,
+		},
+	} {
+		t.Logf("case %s", tt.name)
+		t.Logf("Checking %s v3-backend for original learner", tt.proc.Config().Name)
+		dbPath := datadir.ToBackendFileName(tt.proc.Config().DataDirPath)
+		mInfo := membershipInfoFromBackend(t, dbPath, learnerID)
+		require.Equal(t, tt.isLearner, mInfo.IsLearner, "%x is learner (%+v)", learnerID, mInfo)
+	}
+}
+
+func membershipInfoFromBackend(t *testing.T, dbPath string, memberID uint64) *membership.Member {
+	db, err := bbolt.Open(dbPath, 0666, nil)
+	require.NoError(t, err, "failed to open backend %s", dbPath)
+
+	defer func() {
+		require.NoError(t, db.Close())
+	}()
+
+	m := &membership.Member{}
+	err = db.View(func(tx *bbolt.Tx) error {
+		value := tx.Bucket(buckets.Members.Name()).
+			Get([]byte(types.ID(memberID).String()))
+
+		return json.Unmarshal(value, m)
+	})
+	require.NoError(t, err, "failed to read membership info for %x", memberID)
+	return m
 }

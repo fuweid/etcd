@@ -148,6 +148,7 @@ type EtcdProcessClusterConfig struct {
 	PeerProxy                    bool
 	EnvVars                      map[string]string
 	Version                      ClusterVersion
+	ExecPath                     string
 	NextClusterVersionCompatible bool
 
 	ClusterSize int
@@ -392,6 +393,9 @@ func (cfg *EtcdProcessClusterConfig) EtcdServerProcessConfig(tb testing.TB, i in
 	switch cfg.Version {
 	case CurrentVersion:
 		execPath = BinPath
+		if cfg.ExecPath != "" {
+			execPath = cfg.ExecPath
+		}
 	case MinorityLastVersion:
 		if i <= cfg.ClusterSize/2 {
 			execPath = BinPath
@@ -658,16 +662,21 @@ func (epc *EtcdProcessCluster) WithStopSignal(sig os.Signal) (ret os.Signal) {
 	return ret
 }
 
+type ServerCfgMutator func(cfg *EtcdServerProcessConfig)
+
 // StartNewProc grows cluster size by one with two phases
 // Phase 1 - Inform cluster of new configuration
 // Phase 2 - Start new member
-func (epc *EtcdProcessCluster) StartNewProc(cfg *EtcdProcessClusterConfig, isLearner bool, tb testing.TB) (memberID uint64, err error) {
+func (epc *EtcdProcessCluster) StartNewProc(cfg *EtcdProcessClusterConfig, isLearner bool, tb testing.TB, mutators ...ServerCfgMutator) (memberID uint64, err error) {
 	memberID, serverCfg, err := epc.AddMember(cfg, isLearner, tb)
 	if err != nil {
 		return 0, err
 	}
 
 	// Then start process
+	for _, mutator := range mutators {
+		mutator(serverCfg)
+	}
 	if err = epc.StartNewProcFromConfig(tb, serverCfg); err != nil {
 		return 0, err
 	}
