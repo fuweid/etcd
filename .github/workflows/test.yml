@@ -1,6 +1,9 @@
 name: Dependabot Go Dependency Check
 
 on:
+  push:
+    branches:
+      - dependabot/go_modules/**
   pull_request:
     branches:
       - dependabot/go_modules/**
