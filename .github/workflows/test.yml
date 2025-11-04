@@ -24,6 +24,7 @@ jobs:
       - name: Update Go dependencies across modules
         run: |
           set -euo pipefail
+          set -x
 
           readonly DEPENDENCY_NAME="${{ steps.dependabot-metadata.outputs.dependency-names }}"
           readonly NEW_VERSION="${{ steps.dependabot-metadata.outputs.new-version }}"
