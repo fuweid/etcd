@@ -15,7 +15,33 @@ jobs:
       id: dependabot-metadata
       uses: dependabot/fetch-metadata@v2
 
-    - name: Check for specific Go dependencies
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go.mod'
+
+    - name: Update Go dependencies across modules
       run: |
         DEPENDENCY_NAMES="${{ steps.dependabot-metadata.outputs.dependency-names }}"
-        echo DEPENDENCY_NAMES
+        echo "Dependency names: $DEPENDENCY_NAMES"
+        NEW_VERSION="${{ steps.dependabot-metadata.outputs.new-version }}"
+        echo "New version: $NEW_VERSION"
+        
+        # Define module directories
+        MODULE_DIRS="api pkg client/pkg client/v3 server etcdutl etcdctl tests tools/mod tools/rw-heatmaps tools/testgrid-analysis cache ."
+        
+        # Update each module directory
+        for dir in $MODULE_DIRS; do
+          echo "Processing module directory: $dir"
+          if [ -f "$dir/go.mod" ]; then
+            cd "$dir"
+            for dep in $DEPENDENCY_NAMES; do
+              echo "Updating $dep to $NEW_VERSION in $dir"
+              go get "$dep@$NEW_VERSION" || echo "Failed to update $dep in $dir"
+            done
+            go mod tidy
+            cd - > /dev/null
+          else
+            echo "No go.mod found in $dir, skipping..."
+          fi
+        done        
