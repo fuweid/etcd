@@ -27,7 +27,7 @@ jobs:
 
           readonly DEPENDENCY_NAME="${{ steps.dependabot-metadata.outputs.dependency-name }}"
           readonly NEW_VERSION="${{ steps.dependabot-metadata.outputs.new-version }}"
-          readonly MODULE_DIRS="api pkg client/pkg client/v3 server etcdutl etcdctl tests tools/mod tools/rw-heatmaps tools/testgrid-analysis cache ."
+          readonly MODULE_DIRS="api pkg client/pkg client/v3 server etcdutl etcdctl tests tools/mod tools/rw-heatmaps tools/testgrid-analysis cache"
 
           for mod_dir in $MODULE_DIRS; do
             echo "Processing module directory: ${mod_dir}"
