@@ -70,4 +70,4 @@ jobs:
 
           git add .
           git commit --amend --no-edit
-          git push --force-with-lease origin ${{ github.head_ref }}
+          git push --force-with-lease origin HEAD:${{ github.head_ref }}
