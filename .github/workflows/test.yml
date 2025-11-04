@@ -1,15 +1,11 @@
 name: Dependabot Go Dependency Check
 
 on:
-  push:
-    branches:
-      - dependabot/go_modules/**
   pull_request:
-    branches:
-      - dependabot/go_modules/**
 
 jobs:
   check-dependencies:
+    if: startsWith(github.head_ref, 'dependabot/go_modules/')
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
