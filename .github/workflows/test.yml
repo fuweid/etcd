@@ -13,10 +13,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 2
+          ref: ${{ github.head_ref }}
 
       - name: Fetch Dependabot metadata
         id: dependabot-metadata
         uses: dependabot/fetch-metadata@v2
+        with:
+          skip-commit-verification: true
 
       - name: Setup Go
         uses: actions/setup-go@v5
