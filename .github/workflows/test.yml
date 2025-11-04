@@ -48,3 +48,4 @@ jobs:
         git status
         make fix
         git status
+        git diff 
