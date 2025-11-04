@@ -24,7 +24,6 @@ jobs:
       - name: Update Go dependencies across modules
         run: |
           set -euo pipefail
-          set -x
 
           readonly DEPENDENCY_NAME="${{ steps.dependabot-metadata.outputs.dependency-names }}"
           readonly NEW_VERSION="${{ steps.dependabot-metadata.outputs.new-version }}"
@@ -44,16 +43,22 @@ jobs:
           done
           make fix
 
-      - name: Commit updated dependencies
+      - name: Check for changes
+        id: check_changes
+        run: |
+          if git diff --quiet; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+
+            git status
+          fi
+
+      - name: Amend and force push
+        if: steps.check_changes.outputs.has_changes == 'true'
         run: |
           set -euo pipefail
 
-          git status
-          git diff .
-
-          if ! git status --porcelain --untracked-files=no | grep -q .; then
-            echo "No Go module changes detected; exiting."
-            exit 0
-          fi
-
-          echo do something
+          git add .
+          git commit --amend --no-edit
+          git push --force-with-lease origin ${{ github.head_ref }}
