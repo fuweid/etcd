@@ -30,6 +30,13 @@ jobs:
         run: |
           set -euo pipefail
 
+          readonly WORKING_DIR="${{ steps.dependabot-metadata.outputs.directory }}"
+
+          if [ "${WORKING_DIR}" != "/" ]; then
+            echo "This action only supports updates from the root module. skip the rest."
+            exit 0
+          fi
+
           readonly DEPENDENCY_NAME="${{ steps.dependabot-metadata.outputs.dependency-names }}"
           readonly NEW_VERSION="${{ steps.dependabot-metadata.outputs.new-version }}"
           readonly MODULE_DIRS="api pkg client/pkg client/v3 server etcdutl etcdctl tests tools/mod tools/rw-heatmaps tools/testgrid-analysis cache ."
