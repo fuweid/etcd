@@ -1,4 +1,5 @@
-name: Dependabot Go Dependency Check
+---
+name: Dependabot Go Dependency Updater
 
 on:
   pull_request:
@@ -8,44 +9,50 @@ jobs:
     if: startsWith(github.head_ref, 'dependabot/go_modules/')
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Fetch Dependabot metadata
-      id: dependabot-metadata
-      uses: dependabot/fetch-metadata@v2
+      - name: Fetch Dependabot metadata
+        id: dependabot-metadata
+        uses: dependabot/fetch-metadata@v2
 
-    - name: Setup Go
-      uses: actions/setup-go@v5
-      with:
-        go-version-file: 'go.mod'
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
 
-    - name: Update Go dependencies across modules
-      run: |
-        DEPENDENCY_NAMES="${{ steps.dependabot-metadata.outputs.dependency-names }}"
-        echo "Dependency names: $DEPENDENCY_NAMES"
-        NEW_VERSION="${{ steps.dependabot-metadata.outputs.new-version }}"
-        echo "New version: $NEW_VERSION"
-        
-        # Define module directories
-        MODULE_DIRS="api pkg client/pkg client/v3 server etcdutl etcdctl tests tools/mod tools/rw-heatmaps tools/testgrid-analysis cache ."
-        
-        # Update each module directory
-        for dir in $MODULE_DIRS; do
-          echo "Processing module directory: $dir"
-          if [ -f "$dir/go.mod" ]; then
-            cd "$dir"
-            for dep in $DEPENDENCY_NAMES; do
-              echo "Updating $dep to $NEW_VERSION in $dir"
-              go get "$dep@v$NEW_VERSION" || echo "Failed to update $dep in $dir"
-            done
-            go mod tidy
-            cd - > /dev/null
-          else
-            echo "No go.mod found in $dir, skipping..."
+      - name: Update Go dependencies across modules
+        run: |
+          set -euo pipefail
+
+          readonly DEPENDENCY_NAME="${{ steps.dependabot-metadata.outputs.dependency-name }}"
+          readonly NEW_VERSION="${{ steps.dependabot-metadata.outputs.new-version }}"
+          readonly MODULE_DIRS="api pkg client/pkg client/v3 server etcdutl etcdctl tests tools/mod tools/rw-heatmaps tools/testgrid-analysis cache ."
+
+          for mod_dir in $MODULE_DIRS; do
+            echo "Processing module directory: ${mod_dir}"
+
+            if [ -f "${mod_dir}/go.mod" ]; then
+              echo "Bumping ${DEPENDENCY_NAME} to ${NEW_VERSION} in ${mod_dir}"
+              go -C ${mod_dir} get "${DEPENDENCY_NAME}@v${NEW_VERSION}"
+              go -C ${mod_dir} mod tidy
+            else
+              echo "No go.mod found in ${mod_dir}"
+              exit 1
+            fi
+          done
+          make fix
+
+      - name: Commit updated dependencies
+        run: |
+          set -euo pipefail
+
+          git status
+          git diff .
+
+          if ! git status --porcelain --untracked-files=no | grep -q .; then
+            echo "No Go module changes detected; exiting."
+            exit 0
           fi
-        done        
-        git status
-        make fix
-        git status
-        git diff 
+
+          echo do something
