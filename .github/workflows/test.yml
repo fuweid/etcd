@@ -37,7 +37,7 @@ jobs:
             cd "$dir"
             for dep in $DEPENDENCY_NAMES; do
               echo "Updating $dep to $NEW_VERSION in $dir"
-              go get "$dep@$NEW_VERSION" || echo "Failed to update $dep in $dir"
+              go get "$dep@v$NEW_VERSION" || echo "Failed to update $dep in $dir"
             done
             go mod tidy
             cd - > /dev/null
@@ -45,3 +45,6 @@ jobs:
             echo "No go.mod found in $dir, skipping..."
           fi
         done        
+        git status
+        make fix
+        git status
