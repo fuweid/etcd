@@ -59,6 +59,12 @@ jobs:
         run: |
           set -euo pipefail
 
+          readonly LAST_AUTHOR_NAME=$(git log -1 --pretty=format:'%an')
+          readonly LAST_AUTHOR_EMAIL=$(git log -1 --pretty=format:'%ae')
+
+          git config --global user.email "${LAST_AUTHOR_EMAIL}"
+          git config --global user.name "${LAST_AUTHOR_NAME}"
+
           git add .
           git commit --amend --no-edit
           git push --force-with-lease origin ${{ github.head_ref }}
