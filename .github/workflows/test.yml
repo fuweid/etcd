@@ -1,0 +1,26 @@
+name: Dependabot Go Dependency Check
+
+on:
+  pull_request:
+    branches:
+      - dependabot/go_modules/**
+
+jobs:
+  check-dependencies:
+    runs-on: ubuntu-latest
+    if: ${{ github.actor == 'dependabot[bot]' }} # Only run for Dependabot PRs
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Fetch Dependabot metadata
+      id: dependabot-metadata
+      uses: dependabot/fetch-metadata@v2
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Check for specific Go dependencies
+      run: |
+        DEPENDENCY_NAMES="${{ steps.dependabot-metadata.outputs.dependency-names }}"
+        echo DEPENDENCY_NAMES
