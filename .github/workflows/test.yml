@@ -1,0 +1,84 @@
+---
+name: Dependabot Go Dependency Updater
+
+on:
+  pull_request:
+
+jobs:
+  check-dependencies:
+    if: startsWith(github.head_ref, 'dependabot/go_modules/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          ref: ${{ github.head_ref }}
+
+      - name: Fetch Dependabot metadata
+        id: dependabot-metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          skip-commit-verification: true
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Update Go dependencies across modules
+        run: |
+          set -euo pipefail
+
+          readonly WORKING_DIR="${{ steps.dependabot-metadata.outputs.directory }}"
+
+          if [ "${WORKING_DIR}" != "/" ]; then
+            echo "This action only supports updates from the root module. skip the rest."
+            exit 0
+          fi
+
+          readonly DEPENDENCY_NAME="${{ steps.dependabot-metadata.outputs.dependency-names }}"
+          readonly NEW_VERSION="${{ steps.dependabot-metadata.outputs.new-version }}"
+          readonly MODULE_DIRS="api pkg client/pkg client/v3 server etcdutl etcdctl tests tools/mod tools/rw-heatmaps tools/testgrid-analysis cache ."
+
+          for mod_dir in $MODULE_DIRS; do
+            echo "Processing module directory: ${mod_dir}"
+
+            if [ -f "${mod_dir}/go.mod" ]; then
+              echo "Bumping ${DEPENDENCY_NAME} to ${NEW_VERSION} in ${mod_dir}"
+              go -C ${mod_dir} get "${DEPENDENCY_NAME}@v${NEW_VERSION}"
+              go -C ${mod_dir} mod tidy
+            else
+              echo "No go.mod found in ${mod_dir}"
+              exit 1
+            fi
+          done
+          make fix
+
+      - name: Check for changes
+        id: check_changes
+        run: |
+          if git diff --quiet; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+
+            git status
+          fi
+
+      - name: Amend and force push
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          set -euo pipefail
+          set -x
+
+          readonly LAST_AUTHOR_NAME=$(git log -1 --pretty=format:'%an')
+          readonly LAST_AUTHOR_EMAIL=$(git log -1 --pretty=format:'%ae')
+
+          git config --global user.email "${LAST_AUTHOR_EMAIL}"
+          git config --global user.name "${LAST_AUTHOR_NAME}"
+
+          git add .
+          git commit --amend --no-edit
+          git show
+          git push --force origin HEAD:${{ github.head_ref }}
