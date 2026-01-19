@@ -10,7 +10,7 @@ require (
 	github.com/cloudflare/cfssl v1.6.5
 	github.com/gogo/protobuf v1.3.2
 	github.com/golangci/golangci-lint/v2 v2.5.0
-	github.com/google/yamlfmt v0.19.0
+	github.com/google/yamlfmt v0.21.0
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.3
 	github.com/ryancurrah/gomodguard v1.4.1
 	go.etcd.io/gofail v0.2.0
@@ -251,4 +251,5 @@ require (
 	k8s.io/klog/v2 v2.130.1 // indirect
 	mvdan.cc/gofumpt v0.9.1 // indirect
 	mvdan.cc/unparam v0.0.0-20250301125049-0df0534333a4 // indirect
+	sigs.k8s.io/yaml v1.6.0 // indirect
 )
