@@ -190,7 +190,7 @@ type readSet map[string]*v3.GetResponse
 
 func (rs readSet) add(keys []string, txnresp *v3.TxnResponse) {
 	for i, resp := range txnresp.Responses {
-		rs[keys[i]] = (*v3.GetResponse)(resp.GetResponseRange())
+		rs[keys[i]] = resp.GetResponseRange()
 	}
 }
 
@@ -290,7 +290,7 @@ func (s *stm) fetch(keys ...string) *v3.GetResponse {
 		panic(stmError{err})
 	}
 	s.rset.add(keys, txnresp)
-	return (*v3.GetResponse)(txnresp.Responses[0].GetResponseRange())
+	return txnresp.Responses[0].GetResponseRange()
 }
 
 func (s *stm) reset() {

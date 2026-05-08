@@ -173,19 +173,19 @@ func (kv *kvPrefix) unprefixTxnResponse(resp *clientv3.TxnResponse) {
 		switch tv := r.Response.(type) {
 		case *pb.ResponseOp_ResponseRange:
 			if tv.ResponseRange != nil {
-				kv.unprefixGetResponse((*clientv3.GetResponse)(tv.ResponseRange))
+				kv.unprefixGetResponse(tv.ResponseRange)
 			}
 		case *pb.ResponseOp_ResponsePut:
 			if tv.ResponsePut != nil {
-				kv.unprefixPutResponse((*clientv3.PutResponse)(tv.ResponsePut))
+				kv.unprefixPutResponse(tv.ResponsePut)
 			}
 		case *pb.ResponseOp_ResponseDeleteRange:
 			if tv.ResponseDeleteRange != nil {
-				kv.unprefixDeleteResponse((*clientv3.DeleteResponse)(tv.ResponseDeleteRange))
+				kv.unprefixDeleteResponse(tv.ResponseDeleteRange)
 			}
 		case *pb.ResponseOp_ResponseTxn:
 			if tv.ResponseTxn != nil {
-				kv.unprefixTxnResponse((*clientv3.TxnResponse)(tv.ResponseTxn))
+				kv.unprefixTxnResponse(tv.ResponseTxn)
 			}
 		default:
 		}

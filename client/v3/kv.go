@@ -27,12 +27,13 @@ import (
 )
 
 type (
-	CompactResponse pb.CompactionResponse
-	PutResponse     pb.PutResponse
-	GetResponse     pb.RangeResponse
+	CompactResponse = pb.CompactionResponse
+	PutResponse     = pb.PutResponse
+	GetResponse     = pb.RangeResponse
 	GetStreamChan   <-chan RangeStreamResponse
-	DeleteResponse  pb.DeleteRangeResponse
-	TxnResponse     pb.TxnResponse
+	DeleteResponse  = pb.DeleteRangeResponse
+	TxnResponse     = pb.TxnResponse
+	OpResponse      = pb.OpResponse
 )
 
 type KV interface {
@@ -104,35 +105,7 @@ func GetStreamToGetResponse(stream GetStreamChan) (*GetResponse, error) {
 		}
 		proto.Merge(resp, r.RangeResponse)
 	}
-	return (*GetResponse)(resp), nil
-}
-
-type OpResponse struct {
-	put *PutResponse
-	get *GetResponse
-	del *DeleteResponse
-	txn *TxnResponse
-}
-
-func (op OpResponse) Put() *PutResponse    { return op.put }
-func (op OpResponse) Get() *GetResponse    { return op.get }
-func (op OpResponse) Del() *DeleteResponse { return op.del }
-func (op OpResponse) Txn() *TxnResponse    { return op.txn }
-
-func (resp *PutResponse) OpResponse() OpResponse {
-	return OpResponse{put: resp}
-}
-
-func (resp *GetResponse) OpResponse() OpResponse {
-	return OpResponse{get: resp}
-}
-
-func (resp *DeleteResponse) OpResponse() OpResponse {
-	return OpResponse{del: resp}
-}
-
-func (resp *TxnResponse) OpResponse() OpResponse {
-	return OpResponse{txn: resp}
+	return resp, nil
 }
 
 type kv struct {
@@ -158,12 +131,12 @@ func NewKVFromKVClient(remote pb.KVClient, c *Client) KV {
 
 func (kv *kv) Put(ctx context.Context, key, val string, opts ...OpOption) (*PutResponse, error) {
 	r, err := kv.Do(ctx, OpPut(key, val, opts...))
-	return r.put, ContextError(ctx, err)
+	return r.Put(), ContextError(ctx, err)
 }
 
 func (kv *kv) Get(ctx context.Context, key string, opts ...OpOption) (*GetResponse, error) {
 	r, err := kv.Do(ctx, OpGet(key, opts...))
-	return r.get, ContextError(ctx, err)
+	return r.Get(), ContextError(ctx, err)
 }
 
 func (kv *kv) GetStream(ctx context.Context, key string, opts ...OpOption) (GetStreamChan, error) {
@@ -191,7 +164,7 @@ func (kv *kv) GetStream(ctx context.Context, key string, opts ...OpOption) (GetS
 
 func (kv *kv) Delete(ctx context.Context, key string, opts ...OpOption) (*DeleteResponse, error) {
 	r, err := kv.Do(ctx, OpDelete(key, opts...))
-	return r.del, ContextError(ctx, err)
+	return r.Del(), ContextError(ctx, err)
 }
 
 func (kv *kv) Compact(ctx context.Context, rev int64, opts ...CompactOption) (*CompactResponse, error) {
@@ -199,7 +172,7 @@ func (kv *kv) Compact(ctx context.Context, rev int64, opts ...CompactOption) (*C
 	if err != nil {
 		return nil, ContextError(ctx, err)
 	}
-	return (*CompactResponse)(resp), nil
+	return resp, nil
 }
 
 func (kv *kv) Txn(ctx context.Context) Txn {
@@ -218,7 +191,7 @@ func (kv *kv) Do(ctx context.Context, op Op) (OpResponse, error) {
 			var resp *pb.RangeResponse
 			resp, err = kv.remote.Range(ctx, op.toRangeRequest(), kv.callOpts...)
 			if err == nil {
-				return OpResponse{get: (*GetResponse)(resp)}, nil
+				return resp.OpResponse(), nil
 			}
 		} else {
 			err = rpctypes.ErrInvalidSortOption
@@ -228,20 +201,20 @@ func (kv *kv) Do(ctx context.Context, op Op) (OpResponse, error) {
 		r := &pb.PutRequest{Key: op.key, Value: op.val, Lease: int64(op.leaseID), PrevKv: op.prevKV, IgnoreValue: op.ignoreValue, IgnoreLease: op.ignoreLease}
 		resp, err = kv.remote.Put(ctx, r, kv.callOpts...)
 		if err == nil {
-			return OpResponse{put: (*PutResponse)(resp)}, nil
+			return resp.OpResponse(), nil
 		}
 	case tDeleteRange:
 		var resp *pb.DeleteRangeResponse
 		r := &pb.DeleteRangeRequest{Key: op.key, RangeEnd: op.end, PrevKv: op.prevKV}
 		resp, err = kv.remote.DeleteRange(ctx, r, kv.callOpts...)
 		if err == nil {
-			return OpResponse{del: (*DeleteResponse)(resp)}, nil
+			return resp.OpResponse(), nil
 		}
 	case tTxn:
 		var resp *pb.TxnResponse
 		resp, err = kv.remote.Txn(ctx, op.toTxnRequest(), kv.callOpts...)
 		if err == nil {
-			return OpResponse{txn: (*TxnResponse)(resp)}, nil
+			return resp.OpResponse(), nil
 		}
 	default:
 		panic("Unknown op")

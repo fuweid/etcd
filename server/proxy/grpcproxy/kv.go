@@ -66,7 +66,7 @@ func (p *kvProxy) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRespo
 	// cache linearizable as serializable
 	req := *r
 	req.Serializable = true
-	gresp := (*pb.RangeResponse)(resp.Get())
+	gresp := resp.Get()
 	p.cache.Add(&req, gresp)
 	cacheKeys.Set(float64(p.cache.Size()))
 
@@ -82,7 +82,7 @@ func (p *kvProxy) Put(ctx context.Context, r *pb.PutRequest) (*pb.PutResponse, e
 	cacheKeys.Set(float64(p.cache.Size()))
 
 	resp, err := p.kv.Do(ctx, PutRequestToOp(r))
-	return (*pb.PutResponse)(resp.Put()), err
+	return resp.Put(), err
 }
 
 func (p *kvProxy) DeleteRange(ctx context.Context, r *pb.DeleteRangeRequest) (*pb.DeleteRangeResponse, error) {
@@ -90,7 +90,7 @@ func (p *kvProxy) DeleteRange(ctx context.Context, r *pb.DeleteRangeRequest) (*p
 	cacheKeys.Set(float64(p.cache.Size()))
 
 	resp, err := p.kv.Do(ctx, DelRequestToOp(r))
-	return (*pb.DeleteRangeResponse)(resp.Del()), err
+	return resp.Del(), err
 }
 
 func (p *kvProxy) txnToCache(reqs []*pb.RequestOp, resps []*pb.ResponseOp) {
@@ -130,7 +130,7 @@ func (p *kvProxy) Txn(ctx context.Context, r *pb.TxnRequest) (*pb.TxnResponse, e
 
 	cacheKeys.Set(float64(p.cache.Size()))
 
-	return (*pb.TxnResponse)(resp), nil
+	return resp, nil
 }
 
 func (p *kvProxy) Compact(ctx context.Context, r *pb.CompactionRequest) (*pb.CompactionResponse, error) {
@@ -146,7 +146,7 @@ func (p *kvProxy) Compact(ctx context.Context, r *pb.CompactionRequest) (*pb.Com
 
 	cacheKeys.Set(float64(p.cache.Size()))
 
-	return (*pb.CompactionResponse)(resp), err
+	return resp, err
 }
 
 func requestOpToOp(union *pb.RequestOp) clientv3.Op {

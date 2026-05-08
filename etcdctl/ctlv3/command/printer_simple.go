@@ -33,45 +33,41 @@ type simplePrinter struct {
 }
 
 func (s *simplePrinter) Del(resp *v3.DeleteResponse) {
-	r := (*pb.DeleteRangeResponse)(resp)
-	fmt.Println(r.GetDeleted())
-	for _, kv := range r.GetPrevKvs() {
+	fmt.Println(resp.GetDeleted())
+	for _, kv := range resp.GetPrevKvs() {
 		printKV(s.isHex, s.valueOnly, kv)
 	}
 }
 
 func (s *simplePrinter) Get(resp *v3.GetResponse) {
-	r := (*pb.RangeResponse)(resp)
-	for _, kv := range r.GetKvs() {
+	for _, kv := range resp.GetKvs() {
 		printKV(s.isHex, s.valueOnly, kv)
 	}
 }
 
 func (s *simplePrinter) Put(r *v3.PutResponse) {
-	resp := (*pb.PutResponse)(r)
 	fmt.Println("OK")
-	if resp.GetPrevKv() != nil {
-		printKV(s.isHex, s.valueOnly, resp.GetPrevKv())
+	if r.GetPrevKv() != nil {
+		printKV(s.isHex, s.valueOnly, r.GetPrevKv())
 	}
 }
 
 func (s *simplePrinter) Txn(resp *v3.TxnResponse) {
-	r := (*pb.TxnResponse)(resp)
-	if r.GetSucceeded() {
+	if resp.GetSucceeded() {
 		fmt.Println("SUCCESS")
 	} else {
 		fmt.Println("FAILURE")
 	}
 
-	for _, opResp := range r.GetResponses() {
+	for _, opResp := range resp.GetResponses() {
 		fmt.Println("")
 		switch v := opResp.GetResponse().(type) {
 		case *pb.ResponseOp_ResponseDeleteRange:
-			s.Del((*v3.DeleteResponse)(v.ResponseDeleteRange))
+			s.Del(v.ResponseDeleteRange)
 		case *pb.ResponseOp_ResponsePut:
-			s.Put((*v3.PutResponse)(v.ResponsePut))
+			s.Put(v.ResponsePut)
 		case *pb.ResponseOp_ResponseRange:
-			s.Get((*v3.GetResponse)(v.ResponseRange))
+			s.Get(v.ResponseRange)
 		default:
 			fmt.Printf("unexpected response %+v\n", opResp)
 		}

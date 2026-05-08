@@ -147,5 +147,5 @@ func (txn *txn) Commit() (*TxnResponse, error) {
 	if err != nil {
 		return nil, ContextError(txn.ctx, err)
 	}
-	return (*TxnResponse)(resp), nil
+	return resp, nil
 }

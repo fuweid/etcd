@@ -314,7 +314,7 @@ func (ctl *EtcdctlV3) Txn(ctx context.Context, compares, ifSucess, ifFail []stri
 	if err := json.Unmarshal([]byte(line), &jsonResp); err != nil {
 		return nil, err
 	}
-	return (*clientv3.TxnResponse)(jsonResp.ToProto()), nil
+	return jsonResp.ToProto(), nil
 }
 
 func (ctl *EtcdctlV3) MemberList(ctx context.Context, serializable bool) (*clientv3.MemberListResponse, error) {

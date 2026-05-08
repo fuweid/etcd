@@ -84,7 +84,7 @@ func (p *jsonPrinter) MemberPromote(_ uint64, r *clientv3.MemberPromoteResponse)
 func (p *jsonPrinter) MemberList(r *clientv3.MemberListResponse)                 { p.printJSON(r) }
 
 func (p *jsonPrinter) Txn(r *clientv3.TxnResponse) {
-	p.printJSON(TxnResponseJSONFromProto((*pb.TxnResponse)(r)))
+	p.printJSON(TxnResponseJSONFromProto(r))
 }
 
 func printJSONTo(w io.Writer, v any) {

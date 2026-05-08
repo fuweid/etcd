@@ -59,44 +59,40 @@ func (p *fieldsPrinter) hdr(h *pb.ResponseHeader) {
 }
 
 func (p *fieldsPrinter) Del(r *v3.DeleteResponse) {
-	resp := (*pb.DeleteRangeResponse)(r)
-	p.hdr(resp.GetHeader())
-	fmt.Println(`"Deleted" :`, resp.GetDeleted())
-	for _, kv := range resp.GetPrevKvs() {
+	p.hdr(r.GetHeader())
+	fmt.Println(`"Deleted" :`, r.GetDeleted())
+	for _, kv := range r.GetPrevKvs() {
 		p.kv("Prev", kv)
 	}
 }
 
 func (p *fieldsPrinter) Get(r *v3.GetResponse) {
-	resp := (*pb.RangeResponse)(r)
-	p.hdr(resp.GetHeader())
-	for _, kv := range resp.GetKvs() {
+	p.hdr(r.GetHeader())
+	for _, kv := range r.GetKvs() {
 		p.kv("", kv)
 	}
-	fmt.Println(`"More" :`, resp.GetMore())
-	fmt.Println(`"Count" :`, resp.GetCount())
+	fmt.Println(`"More" :`, r.GetMore())
+	fmt.Println(`"Count" :`, r.GetCount())
 }
 
 func (p *fieldsPrinter) Put(r *v3.PutResponse) {
-	resp := (*pb.PutResponse)(r)
-	p.hdr(resp.GetHeader())
-	if resp.GetPrevKv() != nil {
-		p.kv("Prev", resp.GetPrevKv())
+	p.hdr(r.GetHeader())
+	if r.GetPrevKv() != nil {
+		p.kv("Prev", r.GetPrevKv())
 	}
 }
 
 func (p *fieldsPrinter) Txn(r *v3.TxnResponse) {
-	resp := (*pb.TxnResponse)(r)
-	p.hdr(resp.GetHeader())
-	fmt.Println(`"Succeeded" :`, resp.GetSucceeded())
-	for _, opResp := range resp.GetResponses() {
+	p.hdr(r.GetHeader())
+	fmt.Println(`"Succeeded" :`, r.GetSucceeded())
+	for _, opResp := range r.GetResponses() {
 		switch v := opResp.GetResponse().(type) {
 		case *pb.ResponseOp_ResponseDeleteRange:
-			p.Del((*v3.DeleteResponse)(v.ResponseDeleteRange))
+			p.Del(v.ResponseDeleteRange)
 		case *pb.ResponseOp_ResponsePut:
-			p.Put((*v3.PutResponse)(v.ResponsePut))
+			p.Put(v.ResponsePut)
 		case *pb.ResponseOp_ResponseRange:
-			p.Get((*v3.GetResponse)(v.ResponseRange))
+			p.Get(v.ResponseRange)
 		default:
 			fmt.Printf("\"Unknown\" : %q\n", fmt.Sprintf("%+v", v))
 		}

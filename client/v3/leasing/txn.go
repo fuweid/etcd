@@ -211,10 +211,10 @@ func (txn *txnLeasing) serverTxn() (*v3.TxnResponse, error) {
 			return nil, err
 		}
 		if resp.Succeeded {
-			txn.commitToCache((*v3pb.TxnResponse)(resp), userTxn)
+			txn.commitToCache(resp, userTxn)
 			userResp := resp.Responses[0].GetResponseTxn()
 			userResp.Header = resp.Header
-			return (*v3.TxnResponse)(userResp), nil
+			return userResp, nil
 		}
 		if err := txn.revokeFallback(resp.Responses); err != nil {
 			return nil, err

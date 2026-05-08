@@ -187,7 +187,7 @@ func paginatedRange(c *v3.Client, key string, pageSize int64, baseOpts []v3.OpOp
 		if rev == 0 {
 			rev = resp.Header.Revision
 		}
-		proto.Merge(merged, (*etcdserverpb.RangeResponse)(resp))
+		proto.Merge(merged, resp)
 		if !resp.More || len(resp.Kvs) == 0 {
 			return nil
 		}

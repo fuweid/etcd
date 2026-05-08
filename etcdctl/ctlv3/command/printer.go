@@ -96,10 +96,10 @@ type printerRPC struct {
 	p func(any)
 }
 
-func (p *printerRPC) Del(r *v3.DeleteResponse)  { p.p((*pb.DeleteRangeResponse)(r)) }
-func (p *printerRPC) Get(r *v3.GetResponse)     { p.p((*pb.RangeResponse)(r)) }
-func (p *printerRPC) Put(r *v3.PutResponse)     { p.p((*pb.PutResponse)(r)) }
-func (p *printerRPC) Txn(r *v3.TxnResponse)     { p.p((*pb.TxnResponse)(r)) }
+func (p *printerRPC) Del(r *v3.DeleteResponse)  { p.p(r) }
+func (p *printerRPC) Get(r *v3.GetResponse)     { p.p(r) }
+func (p *printerRPC) Put(r *v3.PutResponse)     { p.p(r) }
+func (p *printerRPC) Txn(r *v3.TxnResponse)     { p.p(r) }
 func (p *printerRPC) Watch(r *v3.WatchResponse) { p.p(r) }
 
 func (p *printerRPC) Grant(r *v3.LeaseGrantResponse)                      { p.p(r) }

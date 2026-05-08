@@ -249,7 +249,7 @@ func (lkv *leasingKV) put(ctx context.Context, op v3.Op) (pr *v3.PutResponse, er
 			lkv.leases.mu.Lock()
 			lkv.leases.Update(op.KeyBytes(), op.ValueBytes(), resp.Header)
 			lkv.leases.mu.Unlock()
-			pr = (*v3.PutResponse)(resp.Responses[0].GetResponsePut())
+			pr = resp.Responses[0].GetResponsePut()
 			pr.Header = resp.Header
 		}
 		if wc != nil {
@@ -324,7 +324,7 @@ func (lkv *leasingKV) get(ctx context.Context, op v3.Op) (*v3.GetResponse, error
 	if err != nil {
 		return nil, err
 	}
-	getResp := (*v3.GetResponse)(resp.Responses[0].GetResponseRange())
+	getResp := resp.Responses[0].GetResponseRange()
 	getResp.Header = resp.Header
 	if resp.Succeeded {
 		getResp = lkv.leases.Add(key, getResp, op)
@@ -355,7 +355,7 @@ func (lkv *leasingKV) deleteRangeRPC(ctx context.Context, maxLeaseRev int64, key
 	for _, kv := range resp.Responses[0].GetResponseRange().Kvs {
 		lkv.leases.Delete(string(kv.Key), resp.Header)
 	}
-	delResp := (*v3.DeleteResponse)(resp.Responses[1].GetResponseDeleteRange())
+	delResp := resp.Responses[1].GetResponseDeleteRange()
 	delResp.Header = resp.Header
 	return delResp, nil
 }
@@ -396,7 +396,7 @@ func (lkv *leasingKV) delete(ctx context.Context, op v3.Op) (dr *v3.DeleteRespon
 			return nil, err
 		}
 		if resp.Succeeded {
-			dr = (*v3.DeleteResponse)(resp.Responses[0].GetResponseDeleteRange())
+			dr = resp.Responses[0].GetResponseDeleteRange()
 			dr.Header = resp.Header
 			lkv.leases.Delete(key, dr.Header)
 		}
