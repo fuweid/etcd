@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,10 +31,12 @@ import (
 	"go.etcd.io/etcd/client/pkg/v3/fileutil"
 	"go.etcd.io/etcd/client/pkg/v3/types"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/pkg/v3/expect"
 	"go.etcd.io/etcd/server/v3/etcdserver"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/membership"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/snap"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v2store"
+	etcdservererrors "go.etcd.io/etcd/server/v3/etcdserver/errors"
 	"go.etcd.io/etcd/server/v3/storage/datadir"
 	"go.etcd.io/etcd/tests/v3/framework/config"
 	"go.etcd.io/etcd/tests/v3/framework/e2e"
@@ -90,6 +93,53 @@ func TestDowngradeCancellationAfterDowngrading1InClusterOf3(t *testing.T) {
 
 func TestDowngradeCancellationAfterDowngrading2InClusterOf3(t *testing.T) {
 	testDowngradeUpgrade(t, 2, 3, false, cancelAfterDowngrading)
+}
+
+func TestIssue21767SingleNodeDowngradeAddVotingMemberLosesQuorum(t *testing.T) {
+	currentEtcdBinary := e2e.BinPath.Etcd
+	lastReleaseBinary := e2e.BinPath.EtcdLastRelease
+	if !fileutil.Exist(lastReleaseBinary) {
+		t.Skipf("%q does not exist", lastReleaseBinary)
+	}
+
+	currentVersion, err := e2e.GetVersionFromBinary(currentEtcdBinary)
+	require.NoError(t, err)
+	lastVersion, err := e2e.GetVersionFromBinary(lastReleaseBinary)
+	require.NoError(t, err)
+	require.Equalf(t, lastVersion.Minor, currentVersion.Minor-1, "unexpected minor version difference")
+
+	targetVersion := semver.New(lastVersion.String())
+	targetVersion.Patch = 0
+
+	e2e.BeforeTest(t)
+
+	epc := newCluster(t, 1, 10)
+	cc := epc.Etcdctl()
+
+	e2e.DowngradeEnable(t, epc, targetVersion)
+	assertProcessLogContains(t, epc.Procs[0], "remotes server has mismatching etcd version", `"current-server-version":"3.7.0"`, `"target-version":"3.6.0"`)
+	_, err = cc.Put(t.Context(), "before-member-add", "ok", config.PutOptions{Timeout: 3 * time.Second})
+	require.NoError(t, err)
+
+	err = cc.DowngradeEnable(t.Context(), targetVersion.String())
+	require.ErrorContains(t, err, "etcdserver: invalid downgrade target version")
+	assertProcessLogContains(t, epc.Procs[0], "reject downgrade request", "etcdserver: invalid downgrade target version")
+
+	// This mirrors etcd-io/etcd#21767: "member add" adds a voting member.
+	// The new member is not started, so the single-node cluster loses quorum.
+	_, err = cc.MemberAdd(t.Context(), "not-started-voting-member", []string{"http://127.0.0.1:1003"})
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		statuses, err := cc.Status(t.Context())
+		if err != nil || len(statuses) != 1 {
+			return false
+		}
+		return containsStatusError(statuses[0].Errors, etcdservererrors.ErrNoLeader.Error())
+	}, 15*time.Second, 500*time.Millisecond)
+
+	_, err = cc.Put(t.Context(), "after-member-add", "timeout", config.PutOptions{Timeout: time.Second})
+	require.ErrorContains(t, err, context.DeadlineExceeded.Error())
 }
 
 func testDowngradeUpgrade(t *testing.T, numberOfMembersToDowngrade int, clusterSize int, triggerSnapshot bool, triggerCancellation CancellationState) {
@@ -296,6 +346,28 @@ func getMembersAndKeys(t *testing.T, cc *e2e.EtcdctlV3) (*clientv3.MemberListRes
 	assert.NoError(t, err)
 
 	return members, kvs
+}
+
+func containsStatusError(errors []string, target string) bool {
+	for _, err := range errors {
+		if strings.Contains(err, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func assertProcessLogContains(t *testing.T, ep e2e.EtcdProcess, want string, additionalFields ...string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	line, err := ep.Logs().ExpectWithContext(ctx, expect.ExpectedResponse{Value: want})
+	require.NoError(t, err)
+	for _, field := range additionalFields {
+		require.Contains(t, line, field)
+	}
 }
 
 func generateIdenticalVersions(clusterSize int, ver *semver.Version) []*version.Versions {
