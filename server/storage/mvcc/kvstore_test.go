@@ -544,6 +544,132 @@ func TestRestoreContinueUnfinishedCompaction(t *testing.T) {
 	}
 }
 
+// TestRestoreInterruptedCompaction ensures that the index of a restored store
+// has no history before the scheduled compaction, because the interrupted
+// compaction has deleted some of those revisions from the backend.
+func TestRestoreInterruptedCompaction(t *testing.T) {
+	b, _ := betesting.NewDefaultTmpBackend(t)
+	defer b.Close()
+	lg := zaptest.NewLogger(t)
+
+	s0 := NewStore(lg, b, &lease.FakeLessor{}, StoreConfig{})
+	s0.Put([]byte("foo"), []byte("bar"), lease.NoLease)  // rev 2
+	s0.Put([]byte("foo"), []byte("bar1"), lease.NoLease) // rev 3
+	s0.Put([]byte("foo"), []byte("bar2"), lease.NoLease) // rev 4
+	s0.Put([]byte("foo"), []byte("bar3"), lease.NoLease) // rev 5
+
+	// The compaction at 4 was interrupted after it deleted rev 2, but not
+	// rev 3 yet.
+	tx := b.BatchTx()
+	tx.Lock()
+	UnsafeSetScheduledCompact(tx, 4)
+	tx.UnsafeDelete(schema.Key, RevToBytes(Revision{Main: 2}, NewRevBytes()))
+	tx.Unlock()
+	require.NoError(t, s0.Close())
+
+	// Restore without running the resumed compaction, so that the index
+	// only has what restore read from the backend.
+	s := newFakeStore(lg)
+	s.fifoSched.Stop()
+	s.b, s.kvindex, s.fifoSched = b, newTreeIndex(lg), noopScheduler{}
+	defer s.Close()
+	require.NoError(t, s.restore())
+
+	for rev := int64(1); rev < 4; rev++ {
+		_, _, _, err := s.kvindex.Get([]byte("foo"), rev)
+		require.ErrorIsf(t, err, ErrCompacted, "get at %d", rev)
+	}
+	modified, created, version, err := s.kvindex.Get([]byte("foo"), 4)
+	require.NoError(t, err)
+	require.Equal(t, Revision{Main: 4}, modified)
+	require.Equal(t, Revision{Main: 2}, created)
+	require.Equal(t, int64(3), version)
+}
+
+// TestRestoreBumpedRevision ensures that a store is restored from a backend
+// that skips revisions, like etcdutl snapshot restore with --bump-revision
+// and --mark-compacted makes it: the revisions before the bumped one are
+// compacted.
+func TestRestoreBumpedRevision(t *testing.T) {
+	b, _ := betesting.NewDefaultTmpBackend(t)
+	defer b.Close()
+	lg := zaptest.NewLogger(t)
+
+	s0 := NewStore(lg, b, &lease.FakeLessor{}, StoreConfig{})
+	s0.Put([]byte("foo"), []byte("bar"), lease.NoLease)  // rev 2
+	s0.Put([]byte("foo"), []byte("bar1"), lease.NoLease) // rev 3
+	require.NoError(t, s0.Close())
+
+	// Bump the latest revision from 3 to 1003, and mark it compacted.
+	tx := b.BatchTx()
+	tx.Lock()
+	tx.UnsafePut(schema.Key, RevToBytes(Revision{Main: 1003}, NewRevBytes()), []byte{})
+	UnsafeSetScheduledCompact(tx, 1003)
+	tx.Unlock()
+
+	s := NewStore(lg, b, &lease.FakeLessor{}, StoreConfig{})
+	defer s.Close()
+	require.Equal(t, int64(1003), s.Rev())
+	require.Equal(t, int64(1004), s.Put([]byte("foo"), []byte("bar2"), lease.NoLease))
+
+	r, err := s.Range(t.Context(), []byte("foo"), nil, RangeOptions{})
+	require.NoError(t, err)
+	require.Len(t, r.KVs, 1)
+	require.Equal(t, int64(2), r.KVs[0].CreateRevision)
+	require.Equal(t, int64(3), r.KVs[0].Version)
+	_, err = s.Range(t.Context(), []byte("foo"), nil, RangeOptions{Rev: 3})
+	require.ErrorIs(t, err, ErrCompacted)
+}
+
+// TestRestoreCompactedAfterLastRevision ensures that a store is restored from
+// a backend that has nothing at its compacted revision, for example after a
+// compaction by a version that deleted the tombstones at that revision. The
+// current revision of the store is then the compacted one, and the index has
+// to start there.
+func TestRestoreCompactedAfterLastRevision(t *testing.T) {
+	tests := []struct {
+		name string
+		// The compaction at 10 has finished, or it is only scheduled.
+		finished bool
+	}{
+		{name: "finished compaction", finished: true},
+		{name: "scheduled compaction", finished: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, _ := betesting.NewDefaultTmpBackend(t)
+			defer b.Close()
+			lg := zaptest.NewLogger(t)
+
+			s0 := NewStore(lg, b, &lease.FakeLessor{}, StoreConfig{})
+			s0.Put([]byte("foo"), []byte("bar"), lease.NoLease)  // rev 2
+			s0.Put([]byte("foo"), []byte("bar1"), lease.NoLease) // rev 3
+			require.NoError(t, s0.Close())
+
+			tx := b.BatchTx()
+			tx.Lock()
+			UnsafeSetScheduledCompact(tx, 10)
+			if tt.finished {
+				UnsafeSetFinishedCompact(tx, 10)
+			}
+			tx.Unlock()
+
+			s := NewStore(lg, b, &lease.FakeLessor{}, StoreConfig{})
+			defer s.Close()
+			require.Equal(t, int64(10), s.Rev())
+
+			r, err := s.Range(t.Context(), []byte("foo"), nil, RangeOptions{Rev: 10})
+			require.NoError(t, err)
+			require.Len(t, r.KVs, 1)
+			require.Equal(t, "bar1", string(r.KVs[0].Value))
+			_, err = s.Range(t.Context(), []byte("foo"), nil, RangeOptions{Rev: 9})
+			require.ErrorIs(t, err, ErrCompacted)
+
+			require.Equal(t, int64(11), s.Put([]byte("foo"), []byte("bar2"), lease.NoLease))
+		})
+	}
+}
+
 type hashKVResult struct {
 	hash       uint32
 	compactRev int64
@@ -1054,6 +1180,13 @@ type indexRangeResp struct {
 type indexRangeEventsResp struct {
 	revs []Revision
 }
+
+// noopScheduler does not run the jobs.
+type noopScheduler struct{ schedule.Scheduler }
+
+func (noopScheduler) Schedule(schedule.Job) {}
+
+func (noopScheduler) Stop() {}
 
 type fakeIndex struct {
 	testutil.Recorder

@@ -695,3 +695,128 @@ func TestIndexCompactAndKeep(t *testing.T) {
 		checkRevisions(ti, rev, tt.keep)
 	}
 }
+
+// TestIndexRestoreAfterCompaction ensures that an index restored from a
+// compacted backend has no history before the compacted revision.
+func TestIndexRestoreAfterCompaction(t *testing.T) {
+	// rev  1        2        3        4           5        6           7        8
+	//      put bar  put baz  put foo  delete bar  put foo  delete baz  put foo  put bar
+	//
+	// The compaction at 6 keeps foo@5 and the tombstone baz@6. It deletes
+	// bar@1, baz@2, foo@3 and the tombstone bar@4, in this order.
+	tests := []struct {
+		name string
+		// The compaction was interrupted after it deleted bar@1 and baz@2.
+		interrupted bool
+	}{
+		{name: "finished compaction", interrupted: false},
+		{name: "interrupted compaction", interrupted: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ti := newTreeIndex(zaptest.NewLogger(t))
+			ti.RestoreCompactRevision(6)
+			if tt.interrupted {
+				ti.Restore([]byte("foo"), Revision{Main: 3}, Revision{Main: 3}, 1)
+				ti.RestoreTombstone([]byte("bar"), Revision{Main: 4})
+			}
+			ti.Restore([]byte("foo"), Revision{Main: 5}, Revision{Main: 3}, 2)
+			ti.RestoreTombstone([]byte("baz"), Revision{Main: 6})
+			ti.Restore([]byte("foo"), Revision{Main: 7}, Revision{Main: 3}, 3)
+			ti.Restore([]byte("bar"), Revision{Main: 8}, Revision{Main: 8}, 1)
+
+			gets := []struct {
+				key                 string
+				rev                 int64
+				wmodified, wcreated Revision
+				wversion            int64
+				werr                error
+			}{
+				{key: "foo", rev: 5, werr: ErrCompacted},
+				{key: "foo", rev: 6, wmodified: Revision{Main: 5}, wcreated: Revision{Main: 3}, wversion: 2},
+				{key: "bar", rev: 6, werr: ErrRevisionNotFound},
+				{key: "baz", rev: 6, werr: ErrRevisionNotFound},
+				{key: "foo", rev: 7, wmodified: Revision{Main: 7}, wcreated: Revision{Main: 3}, wversion: 3},
+				{key: "bar", rev: 7, werr: ErrRevisionNotFound},
+				{key: "bar", rev: 8, wmodified: Revision{Main: 8}, wcreated: Revision{Main: 8}, wversion: 1},
+			}
+			for _, g := range gets {
+				modified, created, version, err := ti.Get([]byte(g.key), g.rev)
+				require.ErrorIsf(t, err, g.werr, "get(%s, %d)", g.key, g.rev)
+				require.Equalf(t, g.wmodified, modified, "get(%s, %d)", g.key, g.rev)
+				require.Equalf(t, g.wcreated, created, "get(%s, %d)", g.key, g.rev)
+				require.Equalf(t, g.wversion, version, "get(%s, %d)", g.key, g.rev)
+			}
+
+			// The resumed compaction keeps foo@5 and the tombstone baz@6.
+			require.Equal(t, map[Revision]struct{}{{Main: 5}: {}, {Main: 6}: {}}, ti.Compact(6))
+			require.Equal(t, map[Revision]struct{}{{Main: 5}: {}}, ti.Keep(6))
+		})
+	}
+}
+
+// TestIndexLongHistory ensures that the index reads every revision that is
+// not compacted, when it has thousands of revisions and a compaction drops
+// hundreds of them.
+func TestIndexLongHistory(t *testing.T) {
+	ti := newTreeIndex(zaptest.NewLogger(t))
+	maxRev, compactRev := int64(3000), int64(0)
+
+	// foo is put at every revision, so its version at rev is rev.
+	checkRevisions := func(latestRev int64) {
+		t.Helper()
+		for rev := int64(1); rev <= latestRev; rev++ {
+			modified, created, version, err := ti.Get([]byte("foo"), rev)
+			if rev < compactRev {
+				require.ErrorIsf(t, err, ErrCompacted, "get at %d after compact(%d)", rev, compactRev)
+				continue
+			}
+			require.NoErrorf(t, err, "get at %d after compact(%d)", rev, compactRev)
+			require.Equalf(t, Revision{Main: rev}, modified, "get at %d after compact(%d)", rev, compactRev)
+			require.Equalf(t, Revision{Main: 1}, created, "get at %d after compact(%d)", rev, compactRev)
+			require.Equalf(t, rev, version, "get at %d after compact(%d)", rev, compactRev)
+		}
+	}
+
+	for rev := int64(1); rev <= maxRev; rev++ {
+		ti.Put([]byte("foo"), Revision{Main: rev})
+		// Compact every 700 revisions, and keep the last 50 of them.
+		if rev%700 == 0 {
+			compactRev = rev - 50
+			require.Equal(t, map[Revision]struct{}{{Main: compactRev}: {}}, ti.Compact(compactRev))
+			checkRevisions(rev)
+		}
+	}
+	checkRevisions(maxRev)
+}
+
+// TestIndexMissingRevision ensures that the index panics at a revision that
+// it does not have, except for a read of a compacted revision.
+func TestIndexMissingRevision(t *testing.T) {
+	tests := []struct {
+		name string
+		f    func(ti index)
+	}{
+		{name: "put before the latest revision", f: func(ti index) { ti.Put([]byte("foo"), Revision{Main: 4}) }},
+		{name: "put after the next revision", f: func(ti index) { ti.Put([]byte("foo"), Revision{Main: 7}) }},
+		{name: "tombstone after the next revision", f: func(ti index) { ti.Tombstone([]byte("foo"), Revision{Main: 7}) }},
+		{name: "get after the latest revision", f: func(ti index) { ti.Get([]byte("foo"), 6) }},
+		{name: "range after the latest revision", f: func(ti index) { ti.Range([]byte("foo"), nil, 6, 0, false) }},
+		{name: "compact after the latest revision", f: func(ti index) { ti.Compact(6) }},
+		{name: "compact before the compacted revision", f: func(ti index) { ti.Compact(2) }},
+		{name: "keep after the latest revision", f: func(ti index) { ti.Keep(6) }},
+		{name: "keep before the compacted revision", f: func(ti index) { ti.Keep(2) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// The index has the revisions 3 to 5.
+			ti := newTreeIndex(zaptest.NewLogger(t))
+			for rev := int64(2); rev <= 5; rev++ {
+				ti.Put([]byte("foo"), Revision{Main: rev})
+			}
+			ti.Compact(3)
+
+			require.Panics(t, func() { tt.f(ti) })
+		})
+	}
+}
