@@ -1113,6 +1113,10 @@ func (i *fakeIndex) Keep(rev int64) map[Revision]struct{} {
 	return <-i.indexCompactRespc
 }
 
+func (i *fakeIndex) RestoreCompactRevision(rev int64) {
+	i.Recorder.Record(testutil.Action{Name: "restoreCompactRevision", Params: []any{rev}})
+}
+
 func (i *fakeIndex) Restore(key []byte, rev, created Revision, ver int64) {
 	i.Recorder.Record(testutil.Action{Name: "restore", Params: []any{key, rev, created, ver}})
 }

@@ -646,26 +646,24 @@ func TestIndexCompactAndKeep(t *testing.T) {
 	// interface only. We don't check the tree internals here, so the test
 	// isn't tied to the treeIndex implementation.
 	//
-	// For this fixture, compaction retains at most one live revision per key at
-	// or before compactRev. All other live revisions in that range are removed.
-	// So, for any atRev <= compactRev, Revisions should only return the kept
-	// revisions which are not greater than atRev. If it returns any other
-	// revision, that revision wasn't removed by compaction.
-	//
-	// Note that querying at compactRev only can't catch this issue, because
-	// the uncompacted index returns the same result at compactRev.
+	// At compactRev, Revisions returns the kept revisions. The revisions
+	// before compactRev can no longer be read: Revisions finds nothing, and
+	// Get returns ErrCompacted.
 	checkRevisions := func(ti index, compactRev int64, kept map[Revision]struct{}) {
 		t.Helper()
-		for atRev := int64(1); atRev <= compactRev; atRev++ {
-			want := make([]Revision, 0, len(kept))
-			for rev := range kept {
-				if rev.Main <= atRev {
-					want = append(want, rev)
-				}
-			}
-			got, total := ti.Revisions([]byte("foo"), []byte("fop"), atRev, 0, true)
-			require.ElementsMatchf(t, want, got, "revisions at %d after compact(%d)", atRev, compactRev)
-			require.Equalf(t, len(want), total, "total at %d after compact(%d)", atRev, compactRev)
+		want := make([]Revision, 0, len(kept))
+		for rev := range kept {
+			want = append(want, rev)
+		}
+		got, total := ti.Revisions([]byte("foo"), []byte("fop"), compactRev, 0, true)
+		require.ElementsMatchf(t, want, got, "revisions at %d after compact(%d)", compactRev, compactRev)
+		require.Equalf(t, len(want), total, "total at %d after compact(%d)", compactRev, compactRev)
+		for atRev := int64(1); atRev < compactRev; atRev++ {
+			got, total = ti.Revisions([]byte("foo"), []byte("fop"), atRev, 0, true)
+			require.Emptyf(t, got, "revisions at %d after compact(%d)", atRev, compactRev)
+			require.Zerof(t, total, "total at %d after compact(%d)", atRev, compactRev)
+			_, _, _, err := ti.Get([]byte("foo"), atRev)
+			require.ErrorIsf(t, err, ErrCompacted, "get at %d after compact(%d)", atRev, compactRev)
 		}
 	}
 

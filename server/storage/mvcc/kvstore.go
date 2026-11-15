@@ -350,6 +350,17 @@ func (s *store) restore() error {
 		s.revMu.Unlock()
 	}
 	scheduledCompact, _ := UnsafeReadScheduledCompact(tx)
+	// The backend has lost revisions before the compacted one, and before
+	// scheduledCompact as well if that compaction was interrupted. So the
+	// index starts at that revision, and what is left of the revisions before
+	// it is its state, see unsafeForRestore.
+	compactRev := finishedCompact
+	if scheduledCompact > compactRev {
+		compactRev = scheduledCompact
+	}
+	if compactRev > 0 {
+		s.kvindex.RestoreCompactRevision(compactRev)
+	}
 	// index keys concurrently as they're loaded in from tx
 	keysGauge.Set(0)
 	rkvc, revc := restoreIntoIndex(s.kvindex)
