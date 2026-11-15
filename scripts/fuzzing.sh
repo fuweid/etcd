@@ -20,14 +20,21 @@ source ./scripts/test_lib.sh
 GO_CMD="go"
 fuzz_time=${FUZZ_TIME:-"300s"}
 target_path=${TARGET_PATH:-"./server/etcdserver/api/v3rpc"}
-TARGETS="FuzzTxnRangeRequest  FuzzTxnPutRequest  FuzzTxnDeleteRangeRequest"
 
+function run_fuzz {
+    local package_path=$1
+    local target=$2
 
-for target in ${TARGETS}; do
-    log_callout -e "\\nExecuting fuzzing with target ${target} in $target_path with a timeout of $fuzz_time\\n"
-    run pushd "${target_path}"
-        $GO_CMD test -fuzz "${target}" -fuzztime "${fuzz_time}"
-    run popd
-    log_success -e "\\COMPLETED: fuzzing with target $target in $target_path \\n"
+    log_callout "Fuzzing ${target} in ${package_path} for ${fuzz_time}"
+    (
+        cd "${package_path}"
+        "${GO_CMD}" test -fuzz "^${target}$" -fuzztime "${fuzz_time}"
+    )
+    log_success "Completed fuzzing ${target} in ${package_path}"
+}
+
+for target in FuzzTxnRangeRequest FuzzTxnPutRequest FuzzTxnDeleteRangeRequest; do
+    run_fuzz "${target_path}" "${target}"
 done
 
+run_fuzz "./server/storage/mvcc" FuzzChunkedSlice
