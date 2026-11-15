@@ -1113,13 +1113,12 @@ func (i *fakeIndex) Keep(rev int64) map[Revision]struct{} {
 	return <-i.indexCompactRespc
 }
 
-func (i *fakeIndex) Insert(ki *keyIndex) {
-	i.Recorder.Record(testutil.Action{Name: "insert", Params: []any{ki}})
+func (i *fakeIndex) Restore(key []byte, rev, created Revision, ver int64) {
+	i.Recorder.Record(testutil.Action{Name: "restore", Params: []any{key, rev, created, ver}})
 }
 
-func (i *fakeIndex) KeyIndex(ki *keyIndex) *keyIndex {
-	i.Recorder.Record(testutil.Action{Name: "keyIndex", Params: []any{ki}})
-	return nil
+func (i *fakeIndex) RestoreTombstone(key []byte, rev Revision) {
+	i.Recorder.Record(testutil.Action{Name: "restoreTombstone", Params: []any{key, rev}})
 }
 
 func createBytesSlice(bytesN, sliceN int) [][]byte {

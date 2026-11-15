@@ -28,11 +28,18 @@ type index interface {
 	CountRevisions(key, end []byte, atRev int64) int
 	Put(key []byte, rev Revision)
 	Tombstone(key []byte, rev Revision) error
+	// Restore and RestoreTombstone add revisions read from the backend, in order.
+	Restore(key []byte, rev, created Revision, ver int64)
+	// RestoreTombstone accepts a key missing from the index. Compaction may keep
+	// a tombstone at the compact revision while removing all earlier revisions
+	// of the key. Restore the tombstone into the index so that resumed compaction
+	// keeps it in the backend for watches starting at that revision.
+	//
+	// See https://github.com/etcd-io/etcd/issues/19179
+	// and https://github.com/etcd-io/etcd/pull/19188.
+	RestoreTombstone(key []byte, rev Revision)
 	Compact(rev int64) map[Revision]struct{}
 	Keep(rev int64) map[Revision]struct{}
-
-	Insert(ki *keyIndex)
-	KeyIndex(ki *keyIndex) *keyIndex
 }
 
 type treeIndex struct {
@@ -76,12 +83,6 @@ func (ti *treeIndex) unsafeGet(key []byte, atRev int64) (modified, created Revis
 		return Revision{}, Revision{}, 0, ErrRevisionNotFound
 	}
 	return keyi.get(ti.lg, atRev)
-}
-
-func (ti *treeIndex) KeyIndex(keyi *keyIndex) *keyIndex {
-	ti.RLock()
-	defer ti.RUnlock()
-	return ti.keyIndex(keyi)
 }
 
 func (ti *treeIndex) keyIndex(keyi *keyIndex) *keyIndex {
@@ -237,8 +238,36 @@ func (ti *treeIndex) Keep(rev int64) map[Revision]struct{} {
 	return available
 }
 
-func (ti *treeIndex) Insert(ki *keyIndex) {
+// Restore takes created and ver from the backend, because compaction may have
+// removed the earlier revisions of the key.
+func (ti *treeIndex) Restore(key []byte, rev, created Revision, ver int64) {
+	keyi := &keyIndex{key: key}
+
 	ti.Lock()
 	defer ti.Unlock()
-	ti.tree.ReplaceOrInsert(ki)
+	okeyi, ok := ti.tree.Get(keyi)
+	if !ok {
+		keyi.restore(ti.lg, created, rev, ver)
+		ti.tree.ReplaceOrInsert(keyi)
+		return
+	}
+	okeyi.put(ti.lg, rev.Main, rev.Sub)
+}
+
+// RestoreTombstone accepts a missing key, because compaction keeps a tombstone
+// but removes the revisions before it.
+func (ti *treeIndex) RestoreTombstone(key []byte, rev Revision) {
+	keyi := &keyIndex{key: key}
+
+	ti.Lock()
+	defer ti.Unlock()
+	okeyi, ok := ti.tree.Get(keyi)
+	if !ok {
+		keyi.restoreTombstone(ti.lg, rev.Main, rev.Sub)
+		ti.tree.ReplaceOrInsert(keyi)
+		return
+	}
+	if err := okeyi.tombstone(ti.lg, rev.Main, rev.Sub); err != nil {
+		ti.lg.Warn("tombstone encountered error", zap.Error(err))
+	}
 }

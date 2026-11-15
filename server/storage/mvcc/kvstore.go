@@ -352,7 +352,7 @@ func (s *store) restore() error {
 	scheduledCompact, _ := UnsafeReadScheduledCompact(tx)
 	// index keys concurrently as they're loaded in from tx
 	keysGauge.Set(0)
-	rkvc, revc := restoreIntoIndex(s.lg, s.kvindex)
+	rkvc, revc := restoreIntoIndex(s.kvindex)
 	for {
 		keys, vals := tx.UnsafeRange(schema.Key, min, max, int64(restoreChunkKeys))
 		if len(keys) == 0 {
@@ -441,34 +441,12 @@ type revKeyValue struct {
 	kstr string
 }
 
-func restoreIntoIndex(lg *zap.Logger, idx index) (chan<- revKeyValue, <-chan int64) {
+func restoreIntoIndex(idx index) (chan<- revKeyValue, <-chan int64) {
 	rkvc, revc := make(chan revKeyValue, restoreChunkKeys), make(chan int64, 1)
 	go func() {
 		currentRev := int64(1)
 		defer func() { revc <- currentRev }()
-		// restore the tree index from streaming the unordered index.
-		kiCache := make(map[string]*keyIndex, restoreChunkKeys)
 		for rkv := range rkvc {
-			ki, ok := kiCache[rkv.kstr]
-			// purge kiCache if many keys but still missing in the cache
-			if !ok && len(kiCache) >= restoreChunkKeys {
-				i := 10
-				for k := range kiCache {
-					delete(kiCache, k)
-					if i--; i == 0 {
-						break
-					}
-				}
-			}
-			// cache miss, fetch from tree index if there
-			if !ok {
-				ki = &keyIndex{key: rkv.kv.Key}
-				if idxKey := idx.KeyIndex(ki); idxKey != nil {
-					kiCache[rkv.kstr], ki = idxKey, idxKey
-					ok = true
-				}
-			}
-
 			rev := BytesToRev(rkv.key)
 			verify.Verify("revision shouldn't be less than the previous revision", func() (bool, map[string]any) {
 				return rev.Main >= currentRev, map[string]any{
@@ -477,23 +455,10 @@ func restoreIntoIndex(lg *zap.Logger, idx index) (chan<- revKeyValue, <-chan int
 				}
 			})
 			currentRev = rev.Main
-
-			if ok {
-				if isTombstone(rkv.key) {
-					if err := ki.tombstone(lg, rev.Main, rev.Sub); err != nil {
-						lg.Warn("tombstone encountered error", zap.Error(err))
-					}
-					continue
-				}
-				ki.put(lg, rev.Main, rev.Sub)
+			if isTombstone(rkv.key) {
+				idx.RestoreTombstone(rkv.kv.Key, rev)
 			} else {
-				if isTombstone(rkv.key) {
-					ki.restoreTombstone(lg, rev.Main, rev.Sub)
-				} else {
-					ki.restore(lg, Revision{Main: rkv.kv.CreateRevision}, rev, rkv.kv.Version)
-				}
-				idx.Insert(ki)
-				kiCache[rkv.kstr] = ki
+				idx.Restore(rkv.kv.Key, rev, Revision{Main: rkv.kv.CreateRevision}, rkv.kv.Version)
 			}
 		}
 	}()
