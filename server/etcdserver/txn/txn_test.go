@@ -404,6 +404,64 @@ func TestReadonlyTxnError(t *testing.T) {
 	}
 }
 
+// TestTxnReadOwnRevision ensures that a txn does not see the revision that it
+// writes before its put, and that it reads that revision after the put.
+func TestTxnReadOwnRevision(t *testing.T) {
+	b, _ := betesting.NewDefaultTmpBackend(t)
+	defer betesting.Close(t, b)
+	lg := zaptest.NewLogger(t)
+	lessor := &lease.FakeLessor{}
+	s := mvcc.NewStore(lg, b, lessor, mvcc.StoreConfig{})
+	defer s.Close()
+
+	// Put foo at every revision from 2 to 10.
+	for range 9 {
+		s.Put([]byte("foo"), []byte("bar"), lease.NoLease)
+	}
+	require.Equal(t, int64(10), s.Rev())
+
+	// Compare foo at revision 10, then update it and read the new value
+	// within the same transaction.
+	req := &pb.TxnRequest{
+		Compare: []*pb.Compare{
+			{
+				Key:         []byte("foo"),
+				Target:      pb.Compare_MOD,
+				Result:      pb.Compare_EQUAL,
+				TargetUnion: &pb.Compare_ModRevision{ModRevision: 10},
+			},
+		},
+		Success: []*pb.RequestOp{
+			{
+				Request: &pb.RequestOp_RequestPut{
+					RequestPut: &pb.PutRequest{Key: []byte("foo"), Value: []byte("bar1")},
+				},
+			},
+			{
+				Request: &pb.RequestOp_RequestRange{
+					RequestRange: &pb.RangeRequest{Key: []byte("foo")},
+				},
+			},
+		},
+	}
+	resp, _, err := Txn(t.Context(), lg, req, false, s, lessor, false)
+	require.NoError(t, err)
+	require.Equal(t, int64(11), resp.Header.Revision)
+
+	// The comparison sees foo at revision 10 before the put.
+	require.True(t, resp.Succeeded)
+
+	// foo is at revision 11 after the put.
+	require.Len(t, resp.Responses, 2)
+	rangeResp := resp.Responses[1].GetResponseRange()
+	require.Equal(t, int64(11), rangeResp.Header.Revision)
+	require.Len(t, rangeResp.Kvs, 1)
+	require.Equal(t, "bar1", string(rangeResp.Kvs[0].Value))
+	require.Equal(t, int64(2), rangeResp.Kvs[0].CreateRevision)
+	require.Equal(t, int64(11), rangeResp.Kvs[0].ModRevision)
+	require.Equal(t, int64(10), rangeResp.Kvs[0].Version)
+}
+
 func TestWriteTxnPanicWithoutApply(t *testing.T) {
 	b, bePath := betesting.NewDefaultTmpBackend(t)
 	s := mvcc.NewStore(zaptest.NewLogger(t), b, &lease.FakeLessor{}, mvcc.StoreConfig{})
