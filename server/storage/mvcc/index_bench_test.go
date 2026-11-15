@@ -17,7 +17,6 @@ package mvcc
 import (
 	"bytes"
 	"fmt"
-	"math"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -41,10 +40,13 @@ func benchmarkIndexCompact(b *testing.B, size int) {
 	for i := 1; i < size; i++ {
 		kvindex.Put(keys[i], Revision{Main: int64(i), Sub: int64(i)})
 	}
+	// The store does not compact after its current revision, which is 1
+	// without a Put.
+	latestRev := max(int64(size-1), 1)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 1; i < b.N; i++ {
-		kvindex.Compact(int64(i))
+		kvindex.Compact(min(int64(i), latestRev))
 	}
 }
 
@@ -147,8 +149,8 @@ func benchmarkIndexPutCount(b *testing.B, dataset *indexBenchDataset, countKeys 
 	} else {
 		end = append(slices.Clone(sortedKeys[len(sortedKeys)-1]), 0)
 	}
-	benchmarkIndexPutWithRead(b, keys, func(kvindex index) bool {
-		if count := kvindex.CountRevisions(start, end, math.MaxInt64); count != countKeys {
+	benchmarkIndexPutWithRead(b, keys, func(kvindex index, rev int64) bool {
+		if count := kvindex.CountRevisions(start, end, rev); count != countKeys {
 			b.Errorf("range count = %d, want %d", count, countKeys)
 			return false
 		}
@@ -176,8 +178,8 @@ func benchmarkIndexPutRangeLimit(b *testing.B, keys [][]byte, limit int, withTot
 	if withTotalCount {
 		wantTotal = len(keys)
 	}
-	benchmarkIndexPutWithRead(b, keys, func(kvindex index) bool {
-		rangeKeys, _, _, _, total := kvindex.Range(nil, end, math.MaxInt64, limit, withTotalCount)
+	benchmarkIndexPutWithRead(b, keys, func(kvindex index, rev int64) bool {
+		rangeKeys, _, _, _, total := kvindex.Range(nil, end, rev, limit, withTotalCount)
 		if len(rangeKeys) != limit || total != wantTotal {
 			b.Errorf("range result = %d keys, total %d; want %d keys, total %d", len(rangeKeys), total, limit, wantTotal)
 			return false
@@ -186,18 +188,22 @@ func benchmarkIndexPutRangeLimit(b *testing.B, keys [][]byte, limit int, withTot
 	})
 }
 
-func benchmarkIndexPutWithRead(b *testing.B, keys [][]byte, read func(index) bool) {
+// benchmarkIndexPutWithRead reads at the revision of the last finished Put,
+// like a read at the current revision of the store.
+func benchmarkIndexPutWithRead(b *testing.B, keys [][]byte, read func(kvindex index, rev int64) bool) {
 	kvindex := newTreeIndex(zap.NewNop())
 	for i, key := range keys {
 		kvindex.Put(key, Revision{Main: int64(i + 1)})
 	}
+	var currentRev atomic.Int64
+	currentRev.Store(int64(len(keys)))
 	var stop atomic.Bool
 	var wg sync.WaitGroup
 	readerReady := make(chan struct{})
 	wg.Go(func() {
 		close(readerReady)
 		for !stop.Load() {
-			if !read(kvindex) {
+			if !read(kvindex, currentRev.Load()) {
 				return
 			}
 		}
@@ -209,7 +215,9 @@ func benchmarkIndexPutWithRead(b *testing.B, keys [][]byte, read func(index) boo
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := range b.N {
-		kvindex.Put(keys[i%len(keys)], Revision{Main: int64(len(keys) + i + 1)})
+		rev := int64(len(keys) + i + 1)
+		kvindex.Put(keys[i%len(keys)], Revision{Main: rev})
+		currentRev.Store(rev)
 	}
 	stop.Store(true)
 	b.StopTimer()

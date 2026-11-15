@@ -26,7 +26,9 @@ import (
 func TestIndexGet(t *testing.T) {
 	ti := newTreeIndex(zaptest.NewLogger(t))
 	ti.Put([]byte("foo"), Revision{Main: 2})
+	ti.Put([]byte("bar"), Revision{Main: 3})
 	ti.Put([]byte("foo"), Revision{Main: 4})
+	ti.Put([]byte("bar"), Revision{Main: 5})
 	ti.Tombstone([]byte("foo"), Revision{Main: 6})
 
 	tests := []struct {
@@ -485,8 +487,6 @@ func TestIndexRevisionsWithTotalCount(t *testing.T) {
 }
 
 func TestIndexCompactAndKeep(t *testing.T) {
-	maxRev := int64(20)
-
 	// foo:  put@1, put@5, delete@9, put@10
 	// foo1: put@2, put@6, delete@7, put@10.1
 	// foo2: put@3, put@4, delete@8
@@ -671,36 +671,29 @@ func TestIndexCompactAndKeep(t *testing.T) {
 
 	ti := buildTreeIndex()
 	// Continuous Compact and Keep
-	for i := int64(1); i < maxRev; i++ {
-		j := i - 1
-		if i >= int64(len(afterCompacts)) {
-			j = int64(len(afterCompacts)) - 1
-		}
+	for _, tt := range afterCompacts {
+		rev := int64(tt.atRev)
 
-		am := ti.Compact(i)
-		require.Equalf(t, afterCompacts[j].compacted, am, "#%d: compact(%d) != expected", i, i)
+		am := ti.Compact(rev)
+		require.Equalf(t, tt.compacted, am, "compact(%d) != expected", rev)
 
-		keep := ti.Keep(i)
-		require.Equalf(t, afterCompacts[j].keep, keep, "#%d: keep(%d) != expected", i, i)
+		keep := ti.Keep(rev)
+		require.Equalf(t, tt.keep, keep, "keep(%d) != expected", rev)
 
-		checkRevisions(ti, i, afterCompacts[j].keep)
+		checkRevisions(ti, rev, tt.keep)
 	}
 
 	// Once Compact and Keep
-	for i := int64(1); i < maxRev; i++ {
+	for _, tt := range afterCompacts {
 		ti := buildTreeIndex()
+		rev := int64(tt.atRev)
 
-		j := i - 1
-		if i >= int64(len(afterCompacts)) {
-			j = int64(len(afterCompacts)) - 1
-		}
+		am := ti.Compact(rev)
+		require.Equalf(t, tt.compacted, am, "compact(%d) != expected", rev)
 
-		am := ti.Compact(i)
-		require.Equalf(t, afterCompacts[j].compacted, am, "#%d: compact(%d) != expected", i, i)
+		keep := ti.Keep(rev)
+		require.Equalf(t, tt.keep, keep, "keep(%d) != expected", rev)
 
-		keep := ti.Keep(i)
-		require.Equalf(t, afterCompacts[j].keep, keep, "#%d: keep(%d) != expected", i, i)
-
-		checkRevisions(ti, i, afterCompacts[j].keep)
+		checkRevisions(ti, rev, tt.keep)
 	}
 }
